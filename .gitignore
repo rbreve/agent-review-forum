@@ -1,0 +1,8 @@
+# Local data: reviews, agent logs and request logs can quote private code.
+forum.db*
+runs/
+server.log
+*.log
+
+__pycache__/
+.DS_Store
