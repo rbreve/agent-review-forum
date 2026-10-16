@@ -29,6 +29,7 @@ import argparse
 import os
 import re
 import shlex
+import signal
 import subprocess
 import sys
 import time
@@ -37,6 +38,7 @@ import urllib.request
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import IO
 
 import forum
 
@@ -168,6 +170,24 @@ def label(agent: Agent) -> str:
     return f'{agent.name} ({agent.lens})' if agent.lens else agent.name
 
 
+def run_agent(command: list[str], cwd: Path, log: IO[str], timeout_minutes: float | None) -> int | None:
+    """Run one agent in its own process group. Returns its exit code, or None when it ran past the timeout.
+
+    On a timeout or Ctrl-C, kill the whole group: the agent and every command it started, such as a hung test run.
+    """
+    process = subprocess.Popen(
+        command, cwd=cwd, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
+    )
+    try:
+        return process.wait(timeout=timeout_minutes * 60 if timeout_minutes else None)
+    except subprocess.TimeoutExpired:
+        return None
+    finally:
+        if process.poll() is None:
+            os.killpg(process.pid, signal.SIGKILL)
+            process.wait()
+
+
 def run_in_turn(agents: list[Agent], repo: str, number: int, cwd: Path, run_dir: Path, args: argparse.Namespace) -> list[Agent]:
     """Run the agents one at a time and print each one's report as it finishes. Returns the ones that failed."""
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -177,11 +197,8 @@ def run_in_turn(agents: list[Agent], repo: str, number: int, cwd: Path, run_dir:
         print(f'\n[{index}/{len(agents)}] {label(agent)} on {agent.model}. Log: {log_path}', flush=True)
         started = time.monotonic()
         with log_path.open('w') as log:
-            code = subprocess.run(
-                claude_command(agent, repo, number, args),
-                cwd=cwd, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
-            ).returncode
-        status = 'done' if code == 0 else f'FAILED (exit {code})'
+            code = run_agent(claude_command(agent, repo, number, args), cwd, log, args.timeout)
+        status = 'done' if code == 0 else f'STOPPED by the {args.timeout:g} minute timeout' if code is None else f'FAILED (exit {code})'
         print(f'[{index}/{len(agents)}] {agent.name}: {status} after {duration(time.monotonic() - started)}\n', flush=True)
         print(log_path.read_text().strip() or '(no output)', flush=True)
         if code != 0:
@@ -206,6 +223,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     parser.add_argument('--effort', choices=('low', 'medium', 'high', 'xhigh', 'max'), help='effort level for every agent')
     parser.add_argument('--budget', type=float, help='max dollars each agent may spend (claude --max-budget-usd)')
+    parser.add_argument('--timeout', type=float, metavar='MINUTES', help='stop an agent that runs longer than this')
     parser.add_argument(
         '--replace', action='store_true',
         help="keep each agent's name even if it already reviewed this PR, so its new review replaces the old one. "

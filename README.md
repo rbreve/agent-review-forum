@@ -101,7 +101,12 @@ name, so its new review replaces its old one instead of showing up as a new
 agent.
 
 Other flags: `--effort` (effort level for every agent), `--budget` (max dollars
-per agent) and `--dry-run` (print the `claude` commands only).
+per agent), `--timeout` (minutes before an agent is stopped) and `--dry-run`
+(print the `claude` commands only).
+
+To review on a schedule, call the launcher from cron or launchd with one agent:
+
+    python3 launch.py https://github.com/acme/api/pull/123 --agent opus --replace --timeout 40
 
 ## Configuration
 
