@@ -12,6 +12,9 @@ what that agent should focus on. With no ``--agent``, it runs ``DEFAULT_AGENTS``
 before it has finished. It writes its own review first, then reads every review and comment posted before it and
 answers them. Each agent's final report goes to ``runs/<repo>-<pr>-<time>/<n>-<agent>.log``.
 
+By default each agent gets a name no one has used on the PR. With ``--replace`` the agents keep their names, so when a
+PR gets new commits, each agent's new review replaces its old one.
+
 Environment:
     FORUM_OWNER      owner for a short target like ``api#123`` (default: the current directory's repo owner)
     FORUM_REPOS_DIR  folder of local clones; agents run in ``$FORUM_REPOS_DIR/<repo>`` when it exists
@@ -143,6 +146,8 @@ def assign_names(agents: list[Agent], taken: set[str]) -> None:
 def claude_command(agent: Agent, repo: str, number: int, args: argparse.Namespace) -> list[str]:
     # --no-wait: the agents before this one are done and the ones after have not started, so nobody would answer.
     prompt = f'/peer-review {repo}#{number} --as {agent.name} --no-wait'
+    if args.replace:
+        prompt += ' --replace'
     if agent.lens:
         prompt += ' --lens "{}"'.format(agent.lens.replace('"', "'"))
     command = ['claude', '-p', prompt, '--model', agent.model, '--name', f'peer-review {agent.name}']
@@ -201,6 +206,11 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     parser.add_argument('--effort', choices=('low', 'medium', 'high', 'xhigh', 'max'), help='effort level for every agent')
     parser.add_argument('--budget', type=float, help='max dollars each agent may spend (claude --max-budget-usd)')
+    parser.add_argument(
+        '--replace', action='store_true',
+        help="keep each agent's name even if it already reviewed this PR, so its new review replaces the old one. "
+        'Use it to review again after new commits.',
+    )
     parser.add_argument('--dry-run', action='store_true', help='print the claude commands and stop')
     args = parser.parse_args(argv)
     # --agent takes every word after it, so a PR given after the agents lands at the end of the last agent's lens.
@@ -222,7 +232,7 @@ def main(argv: list[str] | None = None) -> None:
     if not forum_up() and not args.dry_run:
         print('Starting the forum...', flush=True)
         start_forum()
-    assign_names(agents, agents_on_forum(repo, number) if forum_up() else set())
+    assign_names(agents, agents_on_forum(repo, number) if forum_up() and not args.replace else set())
 
     name = repo.split('/')[1]
     repos_dir = os.environ.get('FORUM_REPOS_DIR')

@@ -1,6 +1,6 @@
 ---
 description: Review a PR as one of several agents, post the review to the local Agent Peer Review forum, then read the other agents' reviews and discuss them
-argument-hint: "<pr-number | repo#pr | pr-url> [--as <agent-name>] [--lens \"<what to focus on>\"] [--no-wait]"
+argument-hint: "<pr-number | repo#pr | pr-url> [--as <agent-name>] [--lens \"<what to focus on>\"] [--no-wait] [--replace]"
 allowed-tools: Bash, Read, Write, Grep, Glob, AskUserQuestion
 ---
 
@@ -16,13 +16,15 @@ Below, `forum` means `python3 "{{SCRIPT}}"`. Always run it with that full path. 
 
 ## 0. Set up
 
-1. **Parse the target.** Accept `123`, `#123`, `api#123`, `acme/api#123`, or a GitHub PR URL, plus three optional
+1. **Parse the target.** Accept `123`, `#123`, `api#123`, `acme/api#123`, or a GitHub PR URL, plus these optional
    flags:
    - `--as <name>`: your agent name.
    - `--lens "<text>"`: what to focus on, for example `--lens "security and tenant isolation"`. The lens is the quoted
      text. If it is not quoted, it runs to the next `--` flag or the end.
    - `--no-wait`: never wait for other agents. Agents run one after another, so the ones before you are done and
      nobody will answer you. See step 3.
+   - `--replace`: post under your name even if it already reviewed this PR, for example before the PR got new
+     commits. You review the PR again, and your new review replaces your old one.
 
    A short repo name (`api#123`) means `$FORUM_OWNER/<name>`. If `FORUM_OWNER` is empty, use the owner of the current
    directory's repo: `gh repo view --json owner -q .owner.login`. With only a number, the repo is the current
@@ -43,6 +45,8 @@ Below, `forum` means `python3 "{{SCRIPT}}"`. Always run it with that full path. 
    - **Post as `<name>-2`**: another session uses this name. Take the next free suffix.
 
    Headless default: post as `<name>-2` (or the next free suffix).
+
+   With `--replace`, skip this check: keep your name, and do the whole review again from step 1.
 
    Keep that name for the whole run.
 4. **Make a work folder** with `mktemp -d` (or use your scratchpad). Your review files go there.
@@ -142,6 +146,8 @@ other agent has posted yet, go straight to step 4.
      evidence. Never post a bare "agree" that adds nothing.
    - **Real issues every review missed:** one general comment each (no `--finding` and no `--review`).
    - Skip nits unless one is wrong.
+   - Skip reviews marked superseded. They were written for older code. Answer a comment on one only if its point
+     still applies to the PR head.
 
    Agents may have different lenses (see the `Lens:` line at the top of each review). An issue outside an agent's
    lens is not a miss on their part, so do not call it one. Judge every finding on its evidence, not on your lens. Your

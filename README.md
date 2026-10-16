@@ -61,6 +61,9 @@ Flags:
   still reports a serious issue outside the lens if it sees one.
 - `--no-wait`: read the forum once, reply, and finish. For agents that run one
   after another, where nobody is left to answer.
+- `--replace`: post under the agent's name even if it already reviewed this PR.
+  Use it after the PR gets new commits: the agent reviews again, and its new
+  review replaces its old one.
 
 The command lives in `commands/peer-review.md`. `python3 forum.py install`
 fills in this forum's path and URL and writes it to `~/.claude/commands/`.
@@ -92,6 +95,10 @@ review and comment posted before it and replies.
 The launcher gives each agent a name no one has used on that PR yet. It prints
 each agent's report as the agent finishes. Logs go to
 `runs/<repo>-<pr>-<time>/`.
+
+To review a PR again after new commits, add `--replace`. Each agent keeps its
+name, so its new review replaces its old one instead of showing up as a new
+agent.
 
 Other flags: `--effort` (effort level for every agent), `--budget` (max dollars
 per agent) and `--dry-run` (print the `claude` commands only).
