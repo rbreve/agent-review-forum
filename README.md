@@ -74,6 +74,11 @@ older copy, and `--dest` to install somewhere else.
         --agent sonnet "data: migrations, backfills, slow queries" \
         --agent fable
 
+The PR can be a GitHub PR URL (`https://github.com/acme/api/pull/123`, also
+without `https://` or with `/files` at the end), `acme/api#123`, `api#123` or
+`123`. It can come before or after the `--agent` flags. The launcher checks
+that the PR exists on GitHub before it starts any agent.
+
 Each `--agent` is a model (an alias such as `opus`, `sonnet`, `fable` or
 `haiku`, or a full model id), then an optional lens. With no `--agent`, it runs
 three opus agents with the lenses "check security", "review and check for bugs"

@@ -38,7 +38,7 @@ from pathlib import Path
 import forum
 
 RUNS = forum.HERE / 'runs'
-URL_RE = re.compile(r'https?://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)\S*')
+URL_RE = re.compile(r'(?:https?://)?(?:www\.)?github\.com/([\w.-]+/[\w.-]+)/pulls?/(\d+)\S*', re.IGNORECASE)
 TARGET_RE = re.compile(r'(?:([\w.-]+(?:/[\w.-]+)?)#)?#?(\d+)')
 NAME_STOPWORDS = {'a', 'an', 'and', 'check', 'code', 'for', 'in', 'it', 'of', 'on', 'or', 'review', 'the', 'to', 'with'}
 # (model, lens) for each agent when no --agent is given, in run order.
@@ -63,6 +63,10 @@ def current_repo(query: str) -> str:
     return result.stdout.strip() if result.returncode == 0 else ''
 
 
+def looks_like_target(value: str) -> bool:
+    return bool(URL_RE.fullmatch(value) or TARGET_RE.fullmatch(value))
+
+
 def parse_target(target: str) -> tuple[str, int]:
     """Turn ``123``, ``#123``, ``api#123``, ``owner/api#123`` or a PR URL into ``(owner/repo, number)``."""
     if match := URL_RE.fullmatch(target):
@@ -81,6 +85,14 @@ def parse_target(target: str) -> tuple[str, int]:
             sys.exit(f'no owner for "{target}". Use owner/{repo}#{number}, or set FORUM_OWNER.')
         repo = f'{owner}/{repo}'
     return repo.lower(), number
+
+
+def pr_title(repo: str, number: int) -> str:
+    """The PR's title. Exits when GitHub has no such PR, before any agent starts on a wrong target."""
+    result = subprocess.run(['gh', 'pr', 'view', str(number), '--repo', repo, '--json', 'title', '-q', '.title'], capture_output=True, text=True)
+    if result.returncode != 0:
+        sys.exit(f'cannot find PR {repo}#{number} on GitHub: {result.stderr.strip()}')
+    return result.stdout.strip()
 
 
 def forum_up() -> bool:
@@ -177,7 +189,10 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         description='Run several /peer-review agents on one PR, one after another, each with its own model and lens.',
         epilog='Example: python3 launch.py acme/api#123 --agent opus "security and tenant isolation" --agent sonnet "data and migrations" --agent fable',
     )
-    parser.add_argument('target', help='PR: 123, api#123, owner/api#123 or a GitHub PR URL')
+    parser.add_argument(
+        'target', nargs='?',
+        help='the PR: a GitHub PR URL, owner/api#123, api#123 or 123. It may come before or after the --agent flags.',
+    )
     default_agents = '; '.join(f'{model} "{lens}"' for model, lens in DEFAULT_AGENTS)
     parser.add_argument(
         '--agent', action='append', nargs='+', metavar=('MODEL', 'LENS'),
@@ -187,12 +202,19 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument('--effort', choices=('low', 'medium', 'high', 'xhigh', 'max'), help='effort level for every agent')
     parser.add_argument('--budget', type=float, help='max dollars each agent may spend (claude --max-budget-usd)')
     parser.add_argument('--dry-run', action='store_true', help='print the claude commands and stop')
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    # --agent takes every word after it, so a PR given after the agents lands at the end of the last agent's lens.
+    if args.target is None and args.agent and len(args.agent[-1]) > 1 and looks_like_target(args.agent[-1][-1]):
+        args.target = args.agent[-1].pop()
+    if args.target is None:
+        parser.error('give the PR to review: a GitHub PR URL, owner/api#123, api#123 or 123')
+    return args
 
 
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     repo, number = parse_target(args.target)
+    title = pr_title(repo, number)
     # No argparse default: with action='append' it would add the given agents to the defaults, not replace them.
     agent_specs = args.agent or [[model, lens] for model, lens in DEFAULT_AGENTS]
     agents = [Agent(model=values[0], lens=' '.join(values[1:]).strip()) for values in agent_specs]
@@ -209,12 +231,13 @@ def main(argv: list[str] | None = None) -> None:
     cwd = clone if clone and clone.is_dir() else Path.cwd()
     run_dir = RUNS / f'{name}-{number}-{datetime.now():%Y%m%d-%H%M%S}'
     if args.dry_run:
-        print(f'# in {cwd}, one after another')
+        print(f'# {repo}#{number}: {title}\n# in {cwd}, one after another')
         for agent in agents:
             print(shlex.join(claude_command(agent, repo, number, args)))
         return
 
-    print(f'Reviewing {repo}#{number} with {len(agents)} agents, one after another. Watch live: {forum.forum_url()}/#/pr/{repo}/{number}', flush=True)
+    print(f'Reviewing {repo}#{number}: {title}', flush=True)
+    print(f'{len(agents)} agents, one after another. Watch live: {forum.forum_url()}/#/pr/{repo}/{number}', flush=True)
     try:
         failed = run_in_turn(agents, repo, number, cwd, run_dir, args)
     except KeyboardInterrupt:
