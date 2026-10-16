@@ -15,9 +15,12 @@ import argparse
 import json
 import os
 import re
+import signal
 import sqlite3
+import subprocess
 import sys
 import textwrap
+import threading
 import time
 import traceback
 import urllib.error
@@ -37,8 +40,21 @@ INDEX_HTML = HERE / 'static' / 'index.html'
 GUIDE_MD = HERE / 'AGENTS.md'
 COMMAND_MD = HERE / 'commands' / 'peer-review.md'
 SERVER_LOG = HERE / 'server.log'
+LAUNCHER = HERE / 'launch.py'
+LAUNCH_LOGS = HERE / 'runs' / 'launches'
 DEFAULT_PORT = 8765
 MAX_REQUEST_BYTES = 2_000_000
+# The UI polls every 4 seconds. GitHub's list of review requests is reused for this long so the poll stays local.
+REQUESTS_TTL = 60
+# Repos per GitHub search. GitHub limits how big one search query may get.
+REPOS_PER_SEARCH = 5
+# Set by the Claude Code session that started the server, which may be long gone. An agent started from the forum
+# should run like one started from your terminal, so the launcher does not get them.
+SESSION_ENV = (
+    'CLAUDECODE', 'CLAUDE_PID', 'CLAUDE_EFFORT', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_EXECPATH',
+    'CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_CHILD_SESSION', 'CLAUDE_CODE_SESSION_ATTENDED',
+    'CLAUDE_CODE_MESSAGING_SOCKET', 'CLAUDE_CODE_MESSAGING_TOKEN',
+)
 
 VERDICTS = ('approve', 'comment', 'request_changes')
 VERDICT_ALIASES = {
@@ -60,6 +76,8 @@ SEVERITY_ALIASES = {
 }
 STANCES = ('agree', 'disagree', 'question')
 REPO_RE = re.compile(r'[\w.-]+/[\w.-]+')
+REPO_URL_RE = re.compile(r'(?:https?://)?(?:www\.)?github\.com/([\w.-]+/[\w.-]+?)(?:\.git)?(?:/\S*)?', re.IGNORECASE)
+PROGRESS_RE = re.compile(r'^\[(\d+)/(\d+)\] ([^\s:]+)', re.MULTILINE)  # launch.py's "[2/3] opus-bugs ..." lines
 NICKNAME_ADJECTIVES = (
     'Amber', 'Bold', 'Brisk', 'Calm', 'Clever', 'Cosmic', 'Daring', 'Eager', 'Fuzzy', 'Gentle', 'Golden', 'Jolly',
     'Keen', 'Lucky', 'Mellow', 'Nimble', 'Plucky', 'Quiet', 'Rapid', 'Silver', 'Steady', 'Swift', 'Tidy', 'Witty',
@@ -113,7 +131,23 @@ CREATE TABLE IF NOT EXISTS agents (
     nickname   TEXT NOT NULL UNIQUE,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS watched_repos (
+    repo       TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS launches (
+    id          INTEGER PRIMARY KEY,
+    repo        TEXT    NOT NULL,
+    number      INTEGER NOT NULL,
+    status      TEXT    NOT NULL,  -- running, done, failed, stopped, or ended (finished while the server was down)
+    pid         INTEGER,
+    log         TEXT    NOT NULL DEFAULT '',
+    exit_code   INTEGER,
+    created_at  TEXT    NOT NULL,
+    finished_at TEXT
+);
 CREATE INDEX IF NOT EXISTS reviews_pr ON reviews (pr_id);
+CREATE INDEX IF NOT EXISTS launches_pr ON launches (repo, number);
 CREATE INDEX IF NOT EXISTS findings_review ON findings (review_id);
 CREATE INDEX IF NOT EXISTS comments_pr ON comments (pr_id);
 """
@@ -131,6 +165,7 @@ class Request:
     data: dict
     args: tuple[str, ...]
     base_url: str
+    db_path: Path
 
 
 # --- storage -----------------------------------------------------------------
@@ -256,6 +291,72 @@ def latest_per_agent(reviews: list[dict]) -> list[dict]:
     return list(latest.values())
 
 
+def verdicts_by_pr(conn: sqlite3.Connection) -> dict[int, list[dict]]:
+    """Each PR's agents with their latest verdict, keyed by the PR's forum id."""
+    verdicts: dict[int, dict[str, str]] = {}
+    for review in conn.execute('SELECT pr_id, agent, verdict FROM reviews ORDER BY id'):
+        verdicts.setdefault(review['pr_id'], {})[review['agent']] = review['verdict']
+    known = nicknames(conn)
+    return {
+        pr_id: [{'agent': agent, 'nickname': known.get(agent), 'verdict': verdict} for agent, verdict in by_agent.items()]
+        for pr_id, by_agent in verdicts.items()
+    }
+
+
+# --- launches: review agents started from the UI -----------------------------
+
+# Launches this server process started and still waits on. Each one has a thread that records how it ends.
+WAITING: dict[int, subprocess.Popen] = {}
+
+
+def launcher_running(pid: int | None) -> bool:
+    """Whether *pid* is still a launch.py process. Once a process ends, the system may give its pid to another one."""
+    if not pid:
+        return False
+    result = subprocess.run(['ps', '-p', str(pid), '-o', 'command='], capture_output=True, text=True)
+    return str(LAUNCHER) in result.stdout
+
+
+def settle_launches(conn: sqlite3.Connection) -> None:
+    """Close launches that ended while no thread waited on them: the server restarted while they ran."""
+    for row in conn.execute("SELECT id, pid FROM launches WHERE status = 'running'").fetchall():
+        if row['id'] not in WAITING and not launcher_running(row['pid']):
+            conn.execute("UPDATE launches SET status = 'ended', finished_at = ? WHERE id = ?", (now(), row['id']))
+
+
+def wait_for_launch(db_path: Path, launch_id: int, process: subprocess.Popen) -> None:
+    code = process.wait()
+    with closing(connect(db_path)) as conn:
+        # A stopped launch keeps its status; it only gets its exit code.
+        conn.execute(
+            "UPDATE launches SET exit_code = ?, finished_at = COALESCE(finished_at, ?), "
+            "status = CASE status WHEN 'running' THEN ? ELSE status END WHERE id = ?",
+            (code, now(), 'done' if code == 0 else 'failed', launch_id),
+        )
+    WAITING.pop(launch_id, None)
+
+
+def launch_view(row: sqlite3.Row) -> dict:
+    """A launch for the UI. A running one also says which agent is at work, from the launcher's log."""
+    launch = dict(row, log_url=f'/api/launches/{row["id"]}/log', progress=None)
+    if row['status'] == 'running' and row['log']:
+        try:
+            steps = PROGRESS_RE.findall(Path(row['log']).read_text(errors='replace'))
+        except OSError:
+            steps = []
+        if steps:
+            step, total, agent = steps[-1]
+            launch['progress'] = {'step': int(step), 'total': int(total), 'agent': agent}
+    return launch
+
+
+def latest_launches(conn: sqlite3.Connection) -> dict[tuple[str, int], dict]:
+    """The newest launch of each PR, keyed by ``(repo, number)``."""
+    settle_launches(conn)
+    rows = conn.execute('SELECT * FROM launches WHERE id IN (SELECT MAX(id) FROM launches GROUP BY repo, number)')
+    return {(row['repo'], row['number']): launch_view(row) for row in rows}
+
+
 # --- input parsing -----------------------------------------------------------
 
 
@@ -341,17 +442,10 @@ def list_prs(req: Request) -> tuple[int, object]:
         ORDER BY last_activity DESC, p.id DESC
         """
     ).fetchall()
-    reviews = req.conn.execute('SELECT pr_id, agent, verdict FROM reviews ORDER BY id').fetchall()
-    verdicts: dict[int, dict[str, str]] = {}
-    for review in reviews:
-        verdicts.setdefault(review['pr_id'], {})[review['agent']] = review['verdict']
-    known = nicknames(req.conn)
+    verdicts = verdicts_by_pr(req.conn)
+    launches = latest_launches(req.conn)
     return 200, [
-        dict(
-            row,
-            ref=pr_ref(row),
-            agents=[{'agent': a, 'nickname': known.get(a), 'verdict': v} for a, v in verdicts.get(row['id'], {}).items()],
-        )
+        dict(row, ref=pr_ref(row), agents=verdicts.get(row['id'], []), launch=launches.get((row['repo'], row['number'])))
         for row in rows
     ]
 
@@ -368,7 +462,8 @@ def create_pr(req: Request) -> tuple[int, object]:
 
 
 def get_pr(req: Request) -> tuple[int, object]:
-    return 200, load_pr(req.conn, resolve_pr(req.conn, req.args[0]))
+    pr = resolve_pr(req.conn, req.args[0])
+    return 200, dict(load_pr(req.conn, pr), launch=latest_launches(req.conn).get((pr['repo'], pr['number'])))
 
 
 def get_pr_markdown(req: Request) -> tuple[int, object]:
@@ -453,6 +548,169 @@ def delete_comment(req: Request) -> tuple[int, object]:
     return 200, {'deleted': f'C{req.args[0]}'}
 
 
+def gh(*args: str) -> str:
+    """Run the GitHub CLI and return what it prints. Its error message becomes the API error."""
+    try:
+        result = subprocess.run(['gh', *args], capture_output=True, text=True, timeout=30)
+    except FileNotFoundError:
+        raise ApiError(502, 'the GitHub CLI (gh) is not on the PATH of the forum server') from None
+    except subprocess.TimeoutExpired:
+        raise ApiError(504, 'GitHub did not answer in 30 seconds') from None
+    if result.returncode != 0:
+        raise ApiError(502, f'gh: {(result.stderr or result.stdout).strip()}')
+    return result.stdout
+
+
+def watched_repos(conn: sqlite3.Connection) -> list[str]:
+    return [row['repo'] for row in conn.execute('SELECT repo FROM watched_repos ORDER BY repo')]
+
+
+def list_watchlist(req: Request) -> tuple[int, object]:
+    return 200, watched_repos(req.conn)
+
+
+def watch_repo(req: Request) -> tuple[int, object]:
+    raw = get_text(req.data, 'repo', required=True, max_len=200)
+    if match := REPO_URL_RE.fullmatch(raw):
+        raw = match.group(1)
+    if not REPO_RE.fullmatch(raw):
+        raise ApiError(400, '"repo" must look like owner/name or a GitHub repo URL')
+    # GitHub checks the repo exists, so a typo fails here and not in every later search.
+    repo = gh('repo', 'view', raw, '--json', 'nameWithOwner', '-q', '.nameWithOwner').strip().lower()
+    req.conn.execute('INSERT INTO watched_repos (repo, created_at) VALUES (?, ?) ON CONFLICT (repo) DO NOTHING', (repo, now()))
+    return 201, {'repo': repo, 'watchlist': watched_repos(req.conn)}
+
+
+def unwatch_repo(req: Request) -> tuple[int, object]:
+    if not req.conn.execute('DELETE FROM watched_repos WHERE repo = ?', (req.args[0].lower(),)).rowcount:
+        raise ApiError(404, f'{req.args[0]} is not on the watchlist')
+    return 200, {'deleted': req.args[0].lower()}
+
+
+REQUESTS_CACHE: dict = {'repos': None, 'at': 0.0, 'fetched_at': '', 'prs': [], 'error': ''}
+REQUESTS_LOCK = threading.Lock()
+
+
+def search_review_requests(repos: list[str]) -> list[dict]:
+    """Open PRs in *repos* that ask for my review, directly or through one of my teams."""
+    found = []
+    for start in range(0, len(repos), REPOS_PER_SEARCH):
+        command = ['search', 'prs', '--review-requested=@me', '--state=open', '--limit=100',
+                   '--json', 'number,title,url,repository,author,updatedAt,isDraft']
+        for repo in repos[start:start + REPOS_PER_SEARCH]:
+            command += ['--repo', repo]
+        found += json.loads(gh(*command) or '[]')
+    prs = [
+        {
+            'repo': item['repository']['nameWithOwner'].lower(),
+            'number': item['number'],
+            'title': item['title'],
+            'url': item['url'],
+            'author': (item.get('author') or {}).get('login', ''),
+            'updated_at': item['updatedAt'],
+            'draft': item['isDraft'],
+        }
+        for item in found
+    ]
+    return sorted(prs, key=lambda pr: pr['updated_at'], reverse=True)
+
+
+def list_review_requests(req: Request) -> tuple[int, object]:
+    """The watchlist, and the PRs in it that wait for my review, with what the forum knows about each one.
+
+    A GitHub failure comes back as ``error`` next to the last good list, so the page still shows the watchlist. It is
+    kept like a good answer, so the next try is a minute later or on Refresh.
+    """
+    repos = watched_repos(req.conn)
+    with REQUESTS_LOCK:
+        cache = REQUESTS_CACHE
+        if cache['repos'] != repos or time.monotonic() - cache['at'] > REQUESTS_TTL or req.data.get('refresh'):
+            try:
+                cache.update(prs=search_review_requests(repos) if repos else [], fetched_at=now(), error='')
+            except ApiError as failure:
+                cache['error'] = str(failure)
+            cache.update(repos=repos, at=time.monotonic())
+        # Copies: the fields added below differ per request and must not end up in the cache.
+        prs = [dict(pr) for pr in cache['prs'] if pr['repo'] in repos]
+        fetched_at, error = cache['fetched_at'], cache['error']
+
+    forum_ids = {(row['repo'], row['number']): row['id'] for row in req.conn.execute('SELECT id, repo, number FROM prs')}
+    verdicts = verdicts_by_pr(req.conn)
+    launches = latest_launches(req.conn)
+    for pr in prs:
+        key = (pr['repo'], pr['number'])
+        pr_id = forum_ids.get(key)
+        pr.update(
+            ref=f'{pr["repo"]}/{pr["number"]}',
+            on_forum=pr_id is not None,
+            agents=verdicts.get(pr_id, []),
+            launch=launches.get(key),
+        )
+    return 200, {'watchlist': repos, 'prs': prs, 'fetched_at': fetched_at, 'error': error}
+
+
+def start_launch(req: Request) -> tuple[int, object]:
+    """Run ``launch.py`` on a PR in the background: its default agents, one after another."""
+    repo = get_text(req.data, 'repo', required=True, max_len=200).lower()
+    if not REPO_RE.fullmatch(repo):
+        raise ApiError(400, '"repo" must look like owner/name')
+    number = parse_line(req.data.get('number'))
+    if not number:
+        raise ApiError(400, '"number" must be a PR number')
+    settle_launches(req.conn)
+    if req.conn.execute("SELECT 1 FROM launches WHERE repo = ? AND number = ? AND status = 'running'", (repo, number)).fetchone():
+        raise ApiError(409, f'agents are already running on {repo}#{number}')
+
+    # The thread exists before the first agent posts, so "watch live" has a page to open.
+    pr = upsert_pr(req.conn, repo, number, get_text(req.data, 'title', max_len=300), get_text(req.data, 'url', max_len=500))
+    # On a PR with reviews, the agents keep their names, so each new review replaces that agent's old one.
+    again = req.conn.execute('SELECT 1 FROM reviews WHERE pr_id = ?', (pr['id'],)).fetchone() is not None
+    launch_id = req.conn.execute(
+        "INSERT INTO launches (repo, number, status, created_at) VALUES (?, ?, 'running', ?)", (repo, number, now()),
+    ).lastrowid
+
+    LAUNCH_LOGS.mkdir(parents=True, exist_ok=True)
+    log_path = LAUNCH_LOGS / f'{launch_id}-{repo.split("/")[1]}-{number}.log'
+    command = [sys.executable, str(LAUNCHER), f'{repo}#{number}', *(['--replace'] if again else [])]
+    env = {key: value for key, value in os.environ.items() if key not in SESSION_ENV} | {'FORUM_URL': req.base_url}
+    with log_path.open('w') as log:
+        # Its own session, so it keeps running when the server stops. Stop sends it SIGTERM.
+        process = subprocess.Popen(
+            command, cwd=HERE, env=env, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
+        )
+    WAITING[launch_id] = process
+    threading.Thread(target=wait_for_launch, args=(req.db_path, launch_id, process), daemon=True).start()
+    req.conn.execute('UPDATE launches SET pid = ?, log = ? WHERE id = ?', (process.pid, str(log_path), launch_id))
+    row = req.conn.execute('SELECT * FROM launches WHERE id = ?', (launch_id,)).fetchone()
+    return 201, dict(launch_view(row), view_url=view_url(req.base_url, pr))
+
+
+def stop_launch(req: Request) -> tuple[int, object]:
+    """Stop a launch. The launcher stops the agent that is running, and the agents after it never start."""
+    settle_launches(req.conn)  # so a pid that now belongs to another program never gets the signal
+    row = req.conn.execute('SELECT * FROM launches WHERE id = ?', (int(req.args[0]),)).fetchone()
+    if row is None:
+        raise ApiError(404, 'launch not found')
+    if row['status'] != 'running':
+        raise ApiError(409, f'launch {row["id"]} is not running (it is {row["status"]})')
+    try:
+        os.kill(row['pid'], signal.SIGTERM)
+    except (ProcessLookupError, TypeError):
+        pass  # it ended a moment ago
+    req.conn.execute("UPDATE launches SET status = 'stopped', finished_at = ? WHERE id = ?", (now(), row['id']))
+    return 200, launch_view(req.conn.execute('SELECT * FROM launches WHERE id = ?', (row['id'],)).fetchone())
+
+
+def get_launch_log(req: Request) -> tuple[int, object]:
+    row = req.conn.execute('SELECT log FROM launches WHERE id = ?', (int(req.args[0]),)).fetchone()
+    if row is None:
+        raise ApiError(404, 'launch not found')
+    try:
+        return 200, Path(row['log']).read_bytes()
+    except OSError:
+        raise ApiError(404, 'the launch has no log (it may have been deleted)') from None
+
+
 PR_REF = r'(\d+|[\w.-]+/[\w.-]+/\d+)'
 ROUTES: list[tuple[str, re.Pattern, Callable[[Request], tuple[int, object]]]] = [
     ('GET', re.compile(r'/api/prs'), list_prs),
@@ -464,7 +722,21 @@ ROUTES: list[tuple[str, re.Pattern, Callable[[Request], tuple[int, object]]]] = 
     ('POST', re.compile(rf'/api/prs/{PR_REF}/comments'), create_comment),
     ('DELETE', re.compile(r'/api/reviews/(\d+)'), delete_review),
     ('DELETE', re.compile(r'/api/comments/(\d+)'), delete_comment),
+    ('GET', re.compile(r'/api/watchlist'), list_watchlist),
+    ('POST', re.compile(r'/api/watchlist'), watch_repo),
+    ('DELETE', re.compile(r'/api/watchlist/([\w.-]+/[\w.-]+)'), unwatch_repo),
+    ('GET', re.compile(r'/api/review-requests'), list_review_requests),
+    ('POST', re.compile(r'/api/launches'), start_launch),
+    ('POST', re.compile(r'/api/launches/(\d+)/stop'), stop_launch),
+    ('GET', re.compile(r'/api/launches/(\d+)/log'), get_launch_log),
 ]
+# These start programs on this machine or change what it asks GitHub. Only the forum's own page may call them:
+# - a page on another site can send a POST, but not with a JSON content type unless the server allows it, which it
+#   never does;
+# - a site that points its own domain at 127.0.0.1 (DNS rebinding) sends its own name as Host, which is refused.
+LOCAL_ONLY = {watch_repo, unwatch_repo, start_launch, stop_launch}
+# These wait on GitHub before they write, so they must not hold the write lock meanwhile. Each makes one write.
+UNLOCKED = {watch_repo}
 
 
 # --- Markdown digest (what agents read) --------------------------------------
@@ -593,7 +865,7 @@ def render_template(path: Path, base_url: str) -> str:
 
 def run_handler(db_path: Path, handler: Callable[[Request], tuple[int, object]], args: tuple[str, ...], data: dict, base_url: str, write: bool) -> tuple[int, object]:
     with closing(connect(db_path)) as conn:
-        req = Request(conn, data, args, base_url)
+        req = Request(conn, data, args, base_url, db_path)
         if not write:
             return handler(req)
         conn.execute('BEGIN IMMEDIATE')
@@ -639,8 +911,16 @@ class Handler(BaseHTTPRequestHandler):
     def base_url(self) -> str:
         return f'http://{self.headers.get("Host") or f"127.0.0.1:{self.server.server_port}"}'
 
+    def check_local(self, method: str) -> None:
+        host = (self.headers.get('Host') or '').rsplit(':', 1)[0].lower()
+        if host not in ('127.0.0.1', 'localhost', '[::1]'):
+            raise ApiError(403, f'this only works from the forum page at http://127.0.0.1:{self.server.server_port}')
+        if method == 'POST' and self.headers.get_content_type() != 'application/json':
+            raise ApiError(415, 'send the body as JSON, with Content-Type: application/json')
+
     def dispatch(self, method: str) -> None:
-        path = urllib.parse.unquote(urllib.parse.urlsplit(self.path).path).rstrip('/') or '/'
+        url = urllib.parse.urlsplit(self.path)
+        path = urllib.parse.unquote(url.path).rstrip('/') or '/'
         if method == 'GET' and path in ('/', '/index.html'):
             return self.send(200, INDEX_HTML.read_bytes(), 'text/html; charset=utf-8')
         if method == 'GET' and path == '/guide.md':
@@ -651,8 +931,11 @@ class Handler(BaseHTTPRequestHandler):
             if route_method != method or not match:
                 continue
             try:
-                data = self.read_json() if method == 'POST' else {}
-                status, payload = run_handler(self.server.db_path, handler, match.groups(), data, self.base_url, write=method != 'GET')
+                if handler in LOCAL_ONLY:
+                    self.check_local(method)
+                data = self.read_json() if method == 'POST' else dict(urllib.parse.parse_qsl(url.query))
+                write = method != 'GET' and handler not in UNLOCKED
+                status, payload = run_handler(self.server.db_path, handler, match.groups(), data, self.base_url, write)
             except ApiError as error:
                 status, payload = error.status, {'error': str(error)}
             except Exception:
@@ -679,7 +962,9 @@ class Handler(BaseHTTPRequestHandler):
         return data
 
     def send_payload(self, status: int, payload: object) -> None:
-        if isinstance(payload, str):
+        if isinstance(payload, bytes):
+            self.send(status, payload, 'text/plain; charset=utf-8')
+        elif isinstance(payload, str):
             self.send(status, payload.encode(), 'text/markdown; charset=utf-8')
         else:
             self.send(status, json.dumps(payload, indent=2, ensure_ascii=False).encode(), 'application/json')

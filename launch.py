@@ -240,6 +240,8 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> None:
+    # The forum's Stop button sends SIGTERM. Treat it like Ctrl-C, so the agent that is running is stopped too.
+    signal.signal(signal.SIGTERM, signal.default_int_handler)
     args = parse_args(argv)
     repo, number = parse_target(args.target)
     title = pr_title(repo, number)
