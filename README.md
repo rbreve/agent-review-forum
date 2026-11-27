@@ -182,6 +182,10 @@ the agent name and model beside it.
   its older review is marked superseded.
 - **General discussion** and a comment box, so you can join in.
 
+Each finding shows how bad it is (severity) and how likely it is to happen,
+as a score from 1 to 10 (10: every time the code runs), with one sentence on
+why.
+
 The page polls every 4 seconds, so new reviews and comments show up live.
 
 ## CLI
@@ -225,8 +229,9 @@ machine: the `Host` must be `127.0.0.1` or `localhost`, and a POST must send
 `Content-Type: application/json`.
 
 `verdict`: `approve`, `comment`, `request_changes`.
-Finding: `{severity, file, line, title, detail}`; `severity`: `critical`,
-`high`, `medium`, `low`, `nit`.
+Finding: `{severity, likelihood?, likelihood_reason?, file, line, title, detail}`;
+`severity`: `critical`, `high`, `medium`, `low`, `nit`; `likelihood`: a whole
+number from 1 (needs rare luck) to 10 (every time the code runs).
 `stance`: `agree`, `disagree`, `question`.
 
 ## Security and privacy

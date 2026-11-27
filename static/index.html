@@ -62,6 +62,14 @@ h2 { font-size: 12.5px; text-transform: uppercase; letter-spacing: .07em; color:
 .s-medium { background: var(--warn-bg); color: var(--warn); }
 .s-low { background: var(--info-bg); color: var(--info); }
 .s-nit { background: var(--neutral-bg); color: var(--neutral); }
+/* how likely a finding is to happen, by score: 9-10, 6-8, 3-5, 1-2 */
+.likely-tag { font-size: 12px; color: var(--muted); }
+.lk-certain { color: var(--bad); }
+.lk-likely { color: var(--warn); }
+.lk-possible { color: var(--info); }
+.lk-unlikely { color: var(--muted); }
+.likely-line { font-size: 13.5px; margin: 2px 0 8px; }
+.likely-line strong { font-weight: 600; }
 .st-agree { color: var(--ok); }
 .st-disagree { color: var(--bad); }
 .st-question { color: var(--warn); }
@@ -171,6 +179,7 @@ tr.detail td { background: var(--panel-2); padding: 2px 14px 14px; }
 .fhead code { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .fhead button { margin-left: auto; }
 .ftitle { font-weight: 600; margin: 6px 0 4px; }
+.cmeta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 2px; }
 
 /* reviews */
 .review { padding: 16px 18px; margin-bottom: 12px; scroll-margin-top: 70px; }
@@ -342,6 +351,20 @@ const verdictPill = v => `<span class="pill v-${esc(v)}">${esc(VERDICT_LABEL[v] 
 const sevPill = s => `<span class="pill s-${esc(s)}">${esc(s)}</span>`;
 const stancePill = s => s ? `<span class="pill st-${esc(s)}">${esc(s)}</span>` : '';
 const loc = f => !f.file ? 'general' : f.line != null ? `${f.file}:${f.line}` : f.file;
+// How likely a finding is to happen, as a score from 1 to 10. Older findings have none.
+const likelyScore = f => Number.isInteger(f.likelihood) ? `<strong class="lk-${f.likelihood >= 9 ? 'certain'
+  : f.likelihood >= 6 ? 'likely' : f.likelihood >= 3 ? 'possible' : 'unlikely'}">${f.likelihood}/10</strong>` : '';
+// "How likely: 7/10", for the findings matrix, where the reason does not fit.
+const likelyTag = f => f.likelihood ? `<span class="likely-tag">How likely: ${likelyScore(f)}</span>` : '';
+// "How likely: 7/10. <why>", under a finding's title.
+function likelyLine(f) {
+  if (!f.likelihood && !f.likelihood_reason) return '';
+  const score = f.likelihood ? `${likelyScore(f)}. ` : '';
+  return `<div class="likely-line"><strong>How likely:</strong> ${score}${inline(f.likelihood_reason || '')}</div>`;
+}
+// Worst first: by severity, then the most likely.
+const bySeverity = (a, b) => (SEV_RANK[a.severity] ?? 9) - (SEV_RANK[b.severity] ?? 9)
+  || (b.likelihood ?? 0) - (a.likelihood ?? 0);
 
 function latestReviews(reviews) {
   const latest = new Map();
@@ -671,14 +694,13 @@ function clusterFindings(latest) {
   for (const c of clusters) {
     c.key = Math.min(...c.findings.map(f => f.id));
     c.agents = new Set(c.findings.map(f => f.agent));
-    const top = [...c.findings].sort((a, b) => (SEV_RANK[a.severity] ?? 9) - (SEV_RANK[b.severity] ?? 9))[0];
-    c.title = top.title;
-    c.rank = SEV_RANK[top.severity] ?? 9;
+    c.top = [...c.findings].sort(bySeverity)[0];
+    c.title = c.top.title;
     c.location = !c.file ? 'general'
       : c.minLine == null ? c.file
       : c.minLine === c.maxLine ? `${c.file}:${c.minLine}` : `${c.file}:${c.minLine}–${c.maxLine}`;
   }
-  return clusters.sort((a, b) => b.agents.size - a.agents.size || a.rank - b.rank || a.location.localeCompare(b.location));
+  return clusters.sort((a, b) => b.agents.size - a.agents.size || bySeverity(a.top, b.top) || a.location.localeCompare(b.location));
 }
 
 function tally(comments) {
@@ -703,6 +725,7 @@ function findingCard(f, comments) {
     <div class="fhead">${sevPill(f.severity)} <span class="fid">F${f.id}</span> ${agentTag(f.agent)} <code>${esc(loc(f))}</code>
       <button data-reply="f:${f.id}">Reply</button></div>
     <div class="ftitle">${inline(f.title)}</div>
+    ${likelyLine(f)}
     ${f.detail ? `<div class="md">${md(f.detail)}</div>` : ''}
     ${comments.map(commentHtml).join('')}
   </div>`;
@@ -727,7 +750,8 @@ function findingsSection(latest, commentsByFinding) {
       : '';
     return `<tr class="cluster${open ? ' open' : ''}" data-toggle="${c.key}" tabindex="0" aria-expanded="${open}">
         <td class="first"><div class="loc"><span class="chev">›</span> ${esc(c.location)}</div>
-          <div class="ctitle">${inline(c.title)}</div>${consensus(c, agents.length)}</td>
+          <div class="ctitle">${inline(c.title)}</div>
+          <div class="cmeta">${likelyTag(c.top)}${consensus(c, agents.length)}</div></td>
         ${cells}
         <td class="tally">${tally(discussion)}</td>
       </tr>${detail}`;
@@ -756,6 +780,7 @@ function verdictCard(review, rounds) {
 function reviewCard(review, superseded, thread) {
   const findings = review.findings.map(f => `<li>
       <div class="fline">${sevPill(f.severity)} <span class="fid">F${f.id}</span> <code>${esc(loc(f))}</code> <strong>${inline(f.title)}</strong></div>
+      ${likelyLine(f)}
       ${f.detail ? `<div class="md">${md(f.detail)}</div>` : ''}
     </li>`).join('');
   const content = `

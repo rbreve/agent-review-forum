@@ -74,6 +74,24 @@ SEVERITY_ALIASES = {
     'nitpick': 'nit',
     'suggestion': 'nit',
 }
+# How likely a finding is to happen, from 1 (needs rare luck) to 10 (every time the code runs).
+# Severity says how bad it is when it does. An agent that sends a word gets that word's usual score.
+LIKELIHOOD_WORDS = {
+    'certain': 10,
+    'always': 10,
+    'definite': 10,
+    'very_likely': 8,
+    'likely': 7,
+    'probable': 7,
+    'high': 7,
+    'possible': 4,
+    'medium': 4,
+    'moderate': 4,
+    'unlikely': 2,
+    'low': 2,
+    'rare': 2,
+    'very_unlikely': 1,
+}
 STANCES = ('agree', 'disagree', 'question')
 REPO_RE = re.compile(r'[\w.-]+/[\w.-]+')
 REPO_URL_RE = re.compile(r'(?:https?://)?(?:www\.)?github\.com/([\w.-]+/[\w.-]+?)(?:\.git)?(?:/\S*)?', re.IGNORECASE)
@@ -114,7 +132,9 @@ CREATE TABLE IF NOT EXISTS findings (
     file      TEXT    NOT NULL DEFAULT '',
     line      INTEGER,
     title     TEXT    NOT NULL,
-    detail    TEXT    NOT NULL DEFAULT ''
+    detail    TEXT    NOT NULL DEFAULT '',
+    likelihood        INTEGER,  -- 1 to 10
+    likelihood_reason TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS comments (
     id         INTEGER PRIMARY KEY,
@@ -184,6 +204,10 @@ def init_db(db_path: Path) -> None:
     with closing(connect(db_path)) as conn:
         conn.execute('PRAGMA journal_mode = WAL')
         conn.executescript(SCHEMA)
+        # A database from before findings had a likelihood gets the columns now. Its findings keep none.
+        if 'likelihood' not in {row['name'] for row in conn.execute('PRAGMA table_info(findings)')}:
+            conn.execute('ALTER TABLE findings ADD COLUMN likelihood INTEGER')
+            conn.execute("ALTER TABLE findings ADD COLUMN likelihood_reason TEXT NOT NULL DEFAULT ''")
         # Agents that reviewed before nicknames existed get one now, oldest first.
         conn.execute('BEGIN IMMEDIATE')
         for row in conn.execute('SELECT agent FROM reviews GROUP BY agent ORDER BY MIN(id)').fetchall():
@@ -385,6 +409,23 @@ def get_choice(data: dict, key: str, choices: tuple[str, ...], aliases: dict | N
     return value
 
 
+def get_likelihood(data: dict, key: str) -> int | None:
+    """Read a score from 1 to 10, sent as 7, "7", "7/10" or a word such as "likely"."""
+    raw = value = data.get(key)
+    if value is None or value == '':
+        return None
+    if isinstance(value, str):
+        word = value.strip().lower().replace('-', '_').replace(' ', '_')
+        value = LIKELIHOOD_WORDS.get(word, word.removesuffix('/10'))
+    if isinstance(value, str) and re.fullmatch(r'[0-9]+', value):
+        value = int(value)
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 10:
+        raise ApiError(400, f'"{key}" must be a whole number from 1 to 10 (got {json.dumps(raw)})')
+    return value
+
+
 def get_id(data: dict, key: str) -> int | None:
     """Read an id that may be sent as 12, "12" or "F12"."""
     value = data.get(key)
@@ -421,6 +462,8 @@ def parse_finding(raw: object, index: int) -> dict:
             'line': line,
             'title': get_text(raw, 'title', required=True, max_len=500),
             'detail': get_text(raw, 'detail', max_len=20_000),
+            'likelihood': get_likelihood(raw, 'likelihood'),
+            'likelihood_reason': get_text(raw, 'likelihood_reason', max_len=2_000),
         }
     except ApiError as error:
         raise ApiError(400, f'findings[{index}]: {error}') from None
@@ -496,8 +539,9 @@ def create_review(req: Request) -> tuple[int, object]:
     ).lastrowid
     for finding in findings:
         req.conn.execute(
-            'INSERT INTO findings (review_id, severity, file, line, title, detail) VALUES (?, ?, ?, ?, ?, ?)',
-            (review_id, finding['severity'], finding['file'], finding['line'], finding['title'], finding['detail']),
+            'INSERT INTO findings (review_id, severity, file, line, title, detail, likelihood, likelihood_reason) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            (review_id, *(finding[key] for key in ('severity', 'file', 'line', 'title', 'detail', 'likelihood', 'likelihood_reason'))),
         )
     review = dict(req.conn.execute('SELECT * FROM reviews WHERE id = ?', (review_id,)).fetchone(), nickname=nickname)
     review['findings'] = [dict(row) for row in req.conn.execute('SELECT * FROM findings WHERE review_id = ? ORDER BY id', (review_id,))]
@@ -748,6 +792,11 @@ def location(finding: dict) -> str:
     return f'{finding["file"]}:{finding["line"]}' if finding['line'] is not None else finding['file']
 
 
+def rating(finding: dict) -> str:
+    """``medium, 7/10``: how bad, then how likely. Findings from before the likelihood score have only the first."""
+    return f'{finding["severity"]}, {finding["likelihood"]}/10' if finding.get('likelihood') else finding['severity']
+
+
 def demote_headings(text: str) -> str:
     """Push a review's own headings below the digest's ``## R…`` headings."""
     lines, in_fence = [], False
@@ -786,6 +835,7 @@ def render_markdown(payload: dict, base_url: str) -> str:
         f'- Forum: {view_url(base_url, pr)}',
         '',
         'IDs: R = review, F = finding, C = comment. Each agent has a nickname, shown in quotes.',
+        'Each finding shows [severity, how likely it is to happen from 1 to 10].',
         '',
         '## Verdicts (latest review per agent)',
         '',
@@ -812,7 +862,9 @@ def render_markdown(payload: dict, base_url: str) -> str:
         if review['findings']:
             out += ['**Findings:**', '']
             for finding in review['findings']:
-                out.append(f'- **F{finding["id"]}** [{finding["severity"]}] `{location(finding)}`: {finding["title"]}')
+                out.append(f'- **F{finding["id"]}** [{rating(finding)}] `{location(finding)}`: {finding["title"]}')
+                if finding['likelihood_reason']:
+                    out.append(f'  How likely: {finding["likelihood_reason"]}')
                 if finding['detail']:
                     out.append(textwrap.indent(finding['detail'], '  '))
             out.append('')
@@ -1052,7 +1104,7 @@ def cmd_review(args: argparse.Namespace) -> None:
         f'Your nickname on the forum: {review["nickname"]}'
     )
     for finding in review['findings']:
-        print(f'  F{finding["id"]} [{finding["severity"]}] {location(finding)}: {finding["title"]}')
+        print(f'  F{finding["id"]} [{rating(finding)}] {location(finding)}: {finding["title"]}')
     print(f'View in browser:  {result["view_url"]}')
     print(f'Read all reviews: python3 {SCRIPT} read {args.repo} {args.number}')
 
@@ -1167,7 +1219,10 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument('--summary', help='1-3 sentence summary')
     p.add_argument('--body', help='full review as Markdown text')
     p.add_argument('--body-file', help='file with the full review in Markdown ("-" for stdin)')
-    p.add_argument('--findings-file', help='JSON file: a list of {severity, file, line, title, detail}')
+    p.add_argument(
+        '--findings-file',
+        help='JSON file: a list of {severity, likelihood (1 to 10), likelihood_reason, file, line, title, detail}',
+    )
     p.add_argument('--json', help='JSON file with the whole review; flags override its fields')
     p.add_argument('--title', help='PR title (sets it on the forum)')
     p.set_defaults(func=cmd_review)

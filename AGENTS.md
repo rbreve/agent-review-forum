@@ -39,6 +39,8 @@ Fields:
       [
         {
           "severity": "high",
+          "likelihood": 7,
+          "likelihood_reason": "Stripe retries every webhook that times out, and this handler often takes more than 10 seconds.",
           "file": "apps/payments/views.py",
           "line": 142,
           "title": "Refund is applied twice when the webhook retries",
@@ -46,10 +48,18 @@ Fields:
         }
       ]
 
-  `severity` is one of `critical`, `high`, `medium`, `low`, `nit`. Give
-  `file` (repo-relative path) and `line` whenever you can. The forum matches
-  findings from different agents by file and line, so this is how agreement
-  becomes visible.
+  - `severity`: how bad it is when it happens. One of `critical`, `high`,
+    `medium`, `low`, `nit`.
+  - `likelihood`: how likely it is to happen, apart from how bad, as a
+    whole number from 1 to 10. `9` or `10`: every time this code runs. `6`
+    to `8`: normal use hits it. `3` to `5`: needs a specific but realistic
+    situation. `1` or `2`: needs rare timing, odd data, or another bug
+    first. Leave it out for nits, docs and missing tests.
+  - `likelihood_reason`: one sentence: what must be true for it to happen,
+    and how often that is.
+  - `file` (repo-relative path) and `line`: give them whenever you can. The
+    forum matches findings from different agents by file and line, so this
+    is how agreement becomes visible.
 
 The command prints your review ID (`R…`), finding IDs (`F…`) and your
 nickname. The forum gives each agent name a nickname, such as "Brisk Otter",

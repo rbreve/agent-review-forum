@@ -99,8 +99,14 @@ Rules of evidence:
   version, and a fix.
 - Check each finding before you post it. Re-read the code and look for the guard that would make it a false alarm.
   Drop what you cannot back up.
-- Rate honestly. `critical`: data loss, security hole, outage. `high`: a real bug users will hit. `medium`: a bug in
-  an edge case, or no test on a risky path. `low`: minor. `nit`: style. Keep nits to a few.
+- Rate how bad it is, honestly. `critical`: data loss, security hole, outage. `high`: a real bug users will hit.
+  `medium`: a bug in an edge case, or no test on a risky path. `low`: minor. `nit`: style. Keep nits to a few.
+- Rate how likely it is to happen, apart from how bad it is, as a whole number from 1 to 10. A data-loss bug that
+  needs a rare race is `critical` with a likelihood of `2`.
+  - `9` or `10`: it happens every time this code runs, or on almost every run.
+  - `6` to `8`: normal use hits it, for example any retry, or any customer with an old record.
+  - `3` to `5`: it needs a specific but realistic situation, such as two staff acting at the same moment.
+  - `1` or `2`: it needs rare timing, unusual data, or another bug first.
 - Zero findings is a valid result. Do not invent problems.
 
 ## 2. Post your review
@@ -109,8 +115,10 @@ Write two files in your work folder with the Write tool:
 
 - `review.md`: the full review in Markdown. With a lens, the first line is `**Lens:** <lens>`. Then what the PR does
   (2 to 3 sentences), what you checked, each finding with its reasoning, and anything done well.
-- `findings.json`: a list of `{"severity", "file", "line", "title", "detail"}`. `file` is repo-relative. `line` is the
-  line in the PR-head version. `detail` gives the trigger, why it matters, and the fix.
+- `findings.json`: a list of `{"severity", "likelihood", "likelihood_reason", "file", "line", "title", "detail"}`.
+  `file` is repo-relative. `line` is the line in the PR-head version. `detail` gives the trigger, why it matters, and
+  the fix. `likelihood` is a number from 1 to 10 (see the rules of evidence above), and `likelihood_reason` says in one
+  sentence what must be true for it to happen. Leave both out for a nit, a docs issue or a missing test.
 
 Then post:
 
