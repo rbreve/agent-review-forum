@@ -1,6 +1,6 @@
 ---
 description: Review a PR as one of several agents, post the review to the local Agent Peer Review forum, then read the other agents' reviews and discuss them
-argument-hint: "<pr-number | repo#pr | pr-url> [--as <agent-name>] [--lens \"<what to focus on>\"] [--no-wait]"
+argument-hint: "<pr-number | repo#pr | pr-url> [--as <agent-name>] [--lens \"<what to focus on>\"] [--no-wait] [--replace]"
 allowed-tools: Bash, Read, Write, Grep, Glob, AskUserQuestion
 ---
 
@@ -16,13 +16,15 @@ Below, `forum` means `python3 "{{SCRIPT}}"`. Always run it with that full path. 
 
 ## 0. Set up
 
-1. **Parse the target.** Accept `123`, `#123`, `api#123`, `acme/api#123`, or a GitHub PR URL, plus three optional
+1. **Parse the target.** Accept `123`, `#123`, `api#123`, `acme/api#123`, or a GitHub PR URL, plus these optional
    flags:
    - `--as <name>`: your agent name.
    - `--lens "<text>"`: what to focus on, for example `--lens "security and tenant isolation"`. The lens is the quoted
      text. If it is not quoted, it runs to the next `--` flag or the end.
    - `--no-wait`: never wait for other agents. Agents run one after another, so the ones before you are done and
      nobody will answer you. See step 3.
+   - `--replace`: post under your name even if it already reviewed this PR, for example before the PR got new
+     commits. You review the PR again, and your new review replaces your old one.
 
    A short repo name (`api#123`) means `$FORUM_OWNER/<name>`. If `FORUM_OWNER` is empty, use the owner of the current
    directory's repo: `gh repo view --json owner -q .owner.login`. With only a number, the repo is the current
@@ -43,6 +45,8 @@ Below, `forum` means `python3 "{{SCRIPT}}"`. Always run it with that full path. 
    - **Post as `<name>-2`**: another session uses this name. Take the next free suffix.
 
    Headless default: post as `<name>-2` (or the next free suffix).
+
+   With `--replace`, skip this check: keep your name, and do the whole review again from step 1.
 
    Keep that name for the whole run.
 4. **Make a work folder** with `mktemp -d` (or use your scratchpad). Your review files go there.
@@ -95,25 +99,80 @@ Rules of evidence:
   version, and a fix.
 - Check each finding before you post it. Re-read the code and look for the guard that would make it a false alarm.
   Drop what you cannot back up.
-- Rate honestly. `critical`: data loss, security hole, outage. `high`: a real bug users will hit. `medium`: a bug in
-  an edge case, or no test on a risky path. `low`: minor. `nit`: style. Keep nits to a few.
+- Rate how bad it is, honestly. `critical`: data loss, security hole, outage. `high`: a real bug users will hit.
+  `medium`: a bug in an edge case, or no test on a risky path. `low`: minor. `nit`: style. Keep nits to a few.
+- Rate how likely it is to happen, apart from how bad it is, as a whole number from 1 to 10. A data-loss bug that
+  needs a rare race is `critical` with a likelihood of `2`.
+  - `9` or `10`: it happens every time this code runs, or on almost every run.
+  - `6` to `8`: normal use hits it, for example any retry, or any customer with an old record.
+  - `3` to `5`: it needs a specific but realistic situation, such as two staff acting at the same moment.
+  - `1` or `2`: it needs rare timing, unusual data, or another bug first.
 - Zero findings is a valid result. Do not invent problems.
+
+## Write in plain English
+
+A busy developer reads what you post. They did not write this PR and do not know this code. They may paste your
+finding into GitHub as it is. Each finding must make sense in one read.
+
+- Short words, short sentences, one idea per sentence.
+- Start with the effect: what a user, a customer or the system gets wrong. Then how it happens. Then the fix.
+- Explain jargon, or skip it. Not "the check fails open", but "the check lets every request through when it cannot
+  run". Not "no row lock", but "two requests at the same moment can both pass the check".
+- Name code exactly, in backticks: `services.py:39`, `issue_password()`. Name only what the reader needs to find the
+  code. Do not build a sentence out of identifiers.
+- Be exact about numbers, names and paths. No vague words such as "might cause issues".
+- No filler: no "it is worth noting", no praise padding, no repeating the title in the detail.
 
 ## 2. Post your review
 
 Write two files in your work folder with the Write tool:
 
-- `review.md`: the full review in Markdown. With a lens, the first line is `**Lens:** <lens>`. Then what the PR does
-  (2 to 3 sentences), what you checked, each finding with its reasoning, and anything done well.
-- `findings.json`: a list of `{"severity", "file", "line", "title", "detail"}`. `file` is repo-relative. `line` is the
-  line in the PR-head version. `detail` gives the trigger, why it matters, and the fix.
+- `review.md`: the full review in Markdown, in this order:
+  - With a lens, `**Lens:** <lens>` on the first line.
+  - **What this PR does:** 2 to 3 sentences.
+  - **What I checked:** a short list.
+  - **Findings:** one line each: severity, how likely (out of 10), and the title. The details live in
+    `findings.json`, so do not repeat them here.
+  - **What looks good:** a short list of real points. Leave it out if there are none.
+- `findings.json`: a list with one entry per distinct issue:
+
+  ```json
+  [
+    {
+      "severity": "high",
+      "likelihood": 7,
+      "likelihood_reason": "Stripe retries every webhook that times out, and this handler often takes more than 10 seconds.",
+      "file": "apps/payments/webhooks.py",
+      "line": 142,
+      "title": "A refund is paid twice when Stripe retries the webhook",
+      "detail": "**What goes wrong:** The customer gets the same refund twice.\n\n**When it happens:** Stripe sends `charge.refunded`. The handler pays the refund but answers after Stripe's timeout, so Stripe sends the same event again. The handler never checks `event.id`, so it pays again.\n\n**Fix:** Store `event.id` in a table with a unique key, and skip an event that is already there."
+    }
+  ]
+  ```
+
+  - `title`: the effect, as a plain sentence. "Staff can overwrite a password the customer chose", not
+    "`_issue_password` skips `USER_PASSWORD_UPDATED`".
+  - `severity` and `likelihood`: see the rules of evidence above. `likelihood` is a number, not a word. Leave it out
+    for a nit, a docs issue or a missing test.
+  - `likelihood_reason`: one sentence: what must be true for it to happen, and how often that is.
+  - `file` is repo-relative. `line` is the line in the PR-head version.
+  - `detail`: Markdown in exactly this shape:
+
+    ```
+    **What goes wrong:** <who sees what, in 1 or 2 sentences>
+
+    **When it happens:** <the trigger: the steps, the input or the timing>
+
+    **Fix:** <what to change. A short code block if it helps.>
+    ```
 
 Then post:
 
 ```
 forum review OWNER/REPO N --agent NAME --model <your model id> \
   --verdict <approve|comment|request_changes> --title "<PR title>" \
-  --summary "<1 to 3 sentences>" --body-file <dir>/review.md --findings-file <dir>/findings.json
+  --summary "<1 to 3 plain sentences, main reason for the verdict first>" \
+  --body-file <dir>/review.md --findings-file <dir>/findings.json
 ```
 
 With a lens, start `--summary` with `Lens: <lens, in a few words>.` so the forum's verdict cards show it.
@@ -142,6 +201,8 @@ other agent has posted yet, go straight to step 4.
      evidence. Never post a bare "agree" that adds nothing.
    - **Real issues every review missed:** one general comment each (no `--finding` and no `--review`).
    - Skip nits unless one is wrong.
+   - Skip reviews marked superseded. They were written for older code. Answer a comment on one only if its point
+     still applies to the PR head.
 
    Agents may have different lenses (see the `Lens:` line at the top of each review). An issue outside an agent's
    lens is not a miss on their part, so do not call it one. Judge every finding on its evidence, not on your lens. Your
@@ -151,7 +212,8 @@ other agent has posted yet, go straight to step 4.
    forum comment OWNER/REPO N --author NAME --finding F12 --stance disagree --body-file <dir>/c1.md
    ```
 
-   Use `--review R3` to answer a whole review. Use `--body-file` for anything longer than one line.
+   Use `--review R3` to answer a whole review. Use `--body-file` for anything longer than one line. Write replies in
+   the same plain English: your answer first (agree, disagree and why, or your question), then the evidence.
 4. If nothing is left to answer, stop. Otherwise run the `wait` command from step 1. When it returns new activity,
    start the next round. When it times out, stop.
 
@@ -161,7 +223,7 @@ compares each agent's newest review. Do this once, not every round.
 
 ## 4. Report to the user
 
-Keep it short and plain:
+Keep it short, in the same plain English:
 
 - Your agent name, and your lens if you had one.
 - Your verdict and main findings, one line each.

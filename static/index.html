@@ -62,6 +62,14 @@ h2 { font-size: 12.5px; text-transform: uppercase; letter-spacing: .07em; color:
 .s-medium { background: var(--warn-bg); color: var(--warn); }
 .s-low { background: var(--info-bg); color: var(--info); }
 .s-nit { background: var(--neutral-bg); color: var(--neutral); }
+/* how likely a finding is to happen, by score: 9-10, 6-8, 3-5, 1-2 */
+.likely-tag { font-size: 12px; color: var(--muted); }
+.lk-certain { color: var(--bad); }
+.lk-likely { color: var(--warn); }
+.lk-possible { color: var(--info); }
+.lk-unlikely { color: var(--muted); }
+.likely-line { font-size: 13.5px; margin: 2px 0 8px; }
+.likely-line strong { font-weight: 600; }
 .st-agree { color: var(--ok); }
 .st-disagree { color: var(--bad); }
 .st-question { color: var(--warn); }
@@ -103,6 +111,31 @@ textarea { resize: vertical; min-height: 96px; }
 .empty { padding: 22px; }
 .empty p { margin-top: 0; }
 
+/* review requests and launches */
+.section-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; margin: 34px 0 10px; }
+.section-head h2 { margin: 0; }
+.section-head .side { margin-left: auto; display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--muted); }
+.watch { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 10px 14px; margin-bottom: 8px; font-size: 13px; }
+.watch .label { color: var(--muted); }
+.chip { display: inline-flex; align-items: center; font-family: var(--mono); font-size: 12px; background: var(--neutral-bg);
+  border-radius: 99px; padding: 1px 2px 1px 10px; }
+.chip button { border: none; background: none; padding: 0 7px; color: var(--muted); font-size: 15px; line-height: 1.3; }
+.chip button:hover { color: var(--bad); }
+.watch form { display: flex; gap: 6px; margin-left: auto; flex: 0 1 320px; }
+.watch input { padding: 4px 9px; font-size: 13px; }
+.req-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 12px 16px; }
+.req-main { flex: 1 1 360px; min-width: 0; }
+.req-main .repo { color: var(--muted); font-family: var(--mono); font-size: 12.5px; }
+.req-main .title { font-weight: 600; color: var(--text); }
+.req-actions { display: flex; align-items: center; gap: 12px; font-size: 13.5px; }
+.run { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+.run.running { color: var(--info); font-weight: 600; }
+.run.running::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; animation: pulse 1.4s ease-in-out infinite; }
+.run.failed { color: var(--bad); }
+.run a { font-weight: 400; }
+.run-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-top: 10px; }
+@keyframes pulse { 50% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { .run.running::before { animation: none; } }
 .prompt { position: relative; background: var(--code-bg); border-radius: 8px; padding: 12px 84px 12px 14px; margin: 8px 0; }
 .prompt pre { margin: 0; white-space: pre-wrap; font-size: 12.5px; line-height: 1.5; }
 .prompt button { position: absolute; top: 8px; right: 8px; }
@@ -145,18 +178,22 @@ tr.detail td { background: var(--panel-2); padding: 2px 14px 14px; }
 .fhead { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; font-size: 13px; }
 .fhead code { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .fhead button { margin-left: auto; }
+.fhead button + button { margin-left: 0; }
 .ftitle { font-weight: 600; margin: 6px 0 4px; }
+.cmeta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 2px; }
 
 /* reviews */
 .review { padding: 16px 18px; margin-bottom: 12px; scroll-margin-top: 70px; }
 .review > header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
 .review > header button { margin-left: auto; }
+.review > header button + button { margin-left: 0; }
 .review.superseded { opacity: .72; }
 .review .summary { margin: 12px 0 0; padding: 10px 12px; background: var(--panel-2); border-radius: 8px; font-size: 14px; }
 .review .body { margin-top: 12px; }
 .flist { list-style: none; padding: 0; margin: 14px 0 0; display: grid; gap: 8px; }
 .flist li { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; }
 .flist .fline { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: baseline; }
+.flist .fline button { margin-left: auto; }
 .flist code { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .flist .md { margin-top: 4px; font-size: 13.5px; color: var(--muted); }
 details.fold > summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-top: 12px; }
@@ -197,6 +234,7 @@ details.fold > summary { cursor: pointer; color: var(--muted); font-size: 13px; 
   .top { padding: 10px 16px; }
   .top-links { display: none; }
   main, .composer-wrap { padding: 0 16px; }
+  .watch form { flex-basis: 100%; }
   h1 { font-size: 21px; }
   .review { padding: 14px; }
 }
@@ -249,7 +287,8 @@ const SEV_RANK = { critical: 0, high: 1, medium: 2, low: 3, nit: 4 };
 const SEVERITIES = Object.keys(SEV_RANK);
 const NEAR_LINES = 5;
 
-const state = { data: null, dataKey: '', renderedAt: 0, expanded: new Set(), seq: 0 };
+// actionError: the last failed launch, stop or watchlist change. watchDraft: the repo typed in before a failed add.
+const state = { data: null, dataKey: '', renderedAt: 0, expanded: new Set(), seq: 0, actionError: '', watchDraft: '' };
 
 const store = {
   get(key) { try { return localStorage.getItem(key) || ''; } catch { return ''; } },
@@ -315,6 +354,45 @@ const verdictPill = v => `<span class="pill v-${esc(v)}">${esc(VERDICT_LABEL[v] 
 const sevPill = s => `<span class="pill s-${esc(s)}">${esc(s)}</span>`;
 const stancePill = s => s ? `<span class="pill st-${esc(s)}">${esc(s)}</span>` : '';
 const loc = f => !f.file ? 'general' : f.line != null ? `${f.file}:${f.line}` : f.file;
+const cap = text => text.charAt(0).toUpperCase() + text.slice(1);
+// How likely a finding is to happen, as a score from 1 to 10. Older findings have none.
+const likelyScore = f => Number.isInteger(f.likelihood) ? `<strong class="lk-${f.likelihood >= 9 ? 'certain'
+  : f.likelihood >= 6 ? 'likely' : f.likelihood >= 3 ? 'possible' : 'unlikely'}">${f.likelihood}/10</strong>` : '';
+// "How likely: 7/10", for the findings matrix, where the reason does not fit.
+const likelyTag = f => f.likelihood ? `<span class="likely-tag">How likely: ${likelyScore(f)}</span>` : '';
+// "How likely: 7/10. <why>", under a finding's title.
+function likelyLine(f) {
+  if (!f.likelihood && !f.likelihood_reason) return '';
+  const score = f.likelihood ? `${likelyScore(f)}. ` : '';
+  return `<div class="likely-line"><strong>How likely:</strong> ${score}${inline(f.likelihood_reason || '')}</div>`;
+}
+// Worst first: by severity, then the most likely.
+const bySeverity = (a, b) => (SEV_RANK[a.severity] ?? 9) - (SEV_RANK[b.severity] ?? 9)
+  || (b.likelihood ?? 0) - (a.likelihood ?? 0);
+
+// ---------- Markdown to paste into GitHub ----------
+
+// One finding as a GitHub comment: what, how bad, how likely, where, then the agent's detail.
+// heading replaces the bold title, e.g. "### 2." inside a whole review.
+function findingMarkdown(f, heading = '') {
+  const odds = f.likelihood || f.likelihood_reason
+    ? ` · **How likely:** ${[f.likelihood && `${f.likelihood}/10.`, f.likelihood_reason].filter(Boolean).join(' ')}` : '';
+  return [
+    heading ? `${heading} ${f.title}` : `**${f.title}**`,
+    `**Severity:** ${cap(f.severity)}${odds}`,
+    f.file ? `**Where:** \`${loc(f)}\`` : '',
+    f.detail,
+  ].filter(Boolean).join('\n\n');
+}
+
+// A whole review: the verdict and summary, then every finding, worst first. The long body stays on the forum.
+function reviewMarkdown(review) {
+  const findings = [...review.findings].sort(bySeverity);
+  return [
+    `**${VERDICT_LABEL[review.verdict] || review.verdict}.** ${review.summary || ''}`.trim(),
+    ...findings.map((f, i) => findingMarkdown(f, `### ${i + 1}.`)),
+  ].join('\n\n');
+}
 
 function latestReviews(reviews) {
   const latest = new Map();
@@ -431,15 +509,19 @@ function setStatus(text, isError) {
   statusEl.classList.toggle('err', isError);
 }
 
-async function refresh(force = false) {
+function typing() {
   const active = document.activeElement;
-  const typing = active && app.contains(active) && /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName);
-  if (!force && typing) return; // don't wipe a form someone is filling in
+  return active && app.contains(active) && /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName);
+}
+
+async function refresh(force = false) {
+  if (!force && typing()) return; // don't wipe a form someone is filling in
   const seq = ++state.seq;
   const r = route();
   try {
-    const data = await api('GET', r.name === 'pr' ? `/api/prs/${r.ref}` : '/api/prs');
-    if (seq !== state.seq) return;
+    const data = r.name === 'pr' ? await api('GET', `/api/prs/${r.ref}`) : await loadHome();
+    // Asking GitHub can take seconds; someone may have started typing meanwhile.
+    if (seq !== state.seq || (!force && typing())) return;
     setStatus('live', false);
     if (r.legacy) history.replaceState(null, '', prHash(data.pr));
     const key = JSON.stringify(data);
@@ -452,6 +534,17 @@ async function refresh(force = false) {
     if (error.status === 404 && r.name === 'pr') renderNotFound();
     else setStatus('server unreachable', true);
   }
+}
+
+// The server keeps GitHub's answer for a minute, so this is cheap to poll. fresh asks GitHub again.
+async function loadHome(fresh = false) {
+  const [prs, requests] = await Promise.all([
+    api('GET', '/api/prs'),
+    // If this fails, the forum list still shows. A 404 means a server started before the watchlist existed.
+    api('GET', `/api/review-requests${fresh ? '?refresh=1' : ''}`).catch(error => (
+      { watchlist: [], prs: [], fetched_at: '', error: error.message, outdated: error.status === 404 })),
+  ]);
+  return { prs, requests };
 }
 
 function render() {
@@ -472,6 +565,30 @@ function promptBox(text) {
   return `<div class="prompt"><pre>${esc(text)}</pre><button data-copy="${esc(text)}">Copy</button></div>`;
 }
 
+// What the launcher is doing. links: false inside a row that is itself a link.
+function launchStatus(launch, { links = true } = {}) {
+  const log = links ? ` · <a href="${esc(launch.log_url)}" target="_blank">log</a>` : '';
+  const p = launch.progress;
+  if (launch.status === 'running') {
+    return `<span class="run running"><span>${p ? `Agent ${p.step} of ${p.total}: ${esc(p.agent)}` : 'Starting agents'}${log}</span></span>`;
+  }
+  const ended = {
+    done: 'Agents finished',
+    failed: `Agents failed${launch.exit_code != null ? ` (exit ${launch.exit_code})` : ''}`,
+    stopped: 'Stopped',
+  }[launch.status] || 'Run ended';
+  return `<span class="run ${esc(launch.status)}"><span>${ended} ${when(launch.finished_at || launch.created_at)}${log}</span></span>`;
+}
+
+// Start the agents, or stop the ones running. One per PR: a reviewed PR gets "Review again".
+function launchButton(pr, launch, reviewed) {
+  if (launch?.status === 'running') return `<button data-stop="${launch.id}">Stop</button>`;
+  return `<button class="${reviewed ? '' : 'primary'}" data-launch="${esc(prRef(pr))}"
+    title="Runs launch.py on this PR: its default agents, one after another${reviewed ? '. Each agent\'s new review replaces its old one' : ''}">${reviewed ? 'Review again' : 'Launch agents'}</button>`;
+}
+
+const actionError = () => state.actionError ? `<p class="error">${esc(state.actionError)}</p>` : '';
+
 function commentHtml(c) {
   return `<div class="comment" style="--h:${hue(c.author)}">
     <div class="chead">${agentTag(c.author)} ${stancePill(c.stance)}
@@ -483,18 +600,72 @@ function commentHtml(c) {
 
 // ---------- home ----------
 
-function renderHome(prs) {
+const verdictPairs = agents => agents
+  .map(a => `<span class="pair">${agentTag(a.agent, '', { compact: true })} ${verdictPill(a.verdict)}</span>`).join('');
+
+function requestRow(pr) {
+  const reviewed = pr.agents.length > 0;
+  return `<div class="card req-row">
+    <div class="req-main">
+      <div><span class="repo">${esc(pr.repo)} #${pr.number}</span> ${pr.draft ? '<span class="pill">Draft</span>' : ''}</div>
+      <a class="title" href="${safeUrl(pr.url)}" target="_blank" rel="noopener">${esc(pr.title || 'Untitled PR')}</a>
+      <div class="pr-meta">
+        <span class="muted">${pr.author ? `by ${esc(pr.author)} · ` : ''}updated ${when(pr.updated_at)}</span>
+        ${pr.launch ? launchStatus(pr.launch) : ''}
+        ${verdictPairs(pr.agents)}
+      </div>
+    </div>
+    <div class="req-actions">
+      ${pr.on_forum ? `<a href="${prHash(pr)}">${reviewed ? 'Reviews' : 'Forum'}</a>` : ''}
+      ${launchButton(pr, pr.launch, reviewed)}
+    </div>
+  </div>`;
+}
+
+function requestsSection({ watchlist, prs, fetched_at, error, outdated }) {
+  if (outdated) {
+    return `<h2>Waiting for your review</h2>
+      <div class="card empty"><p><strong>Restart the forum server to use the watchlist.</strong> It still runs the code
+      from before the watchlist existed. Stop it, then run <code>python3 forum.py serve</code>.</p></div>`;
+  }
+  const chips = watchlist.map(repo => `<span class="chip">${esc(repo)}<button data-unwatch="${esc(repo)}"
+    title="Stop watching ${esc(repo)}" aria-label="Stop watching ${esc(repo)}">×</button></span>`).join('');
+  const empty = !watchlist.length ? 'Add a repo to see its open PRs that ask for your review.'
+    : error ? '' : 'No open PR in these repos asks for your review.';
+  return `
+    <div class="section-head">
+      <h2>Waiting for your review <span class="count">${prs.length}</span></h2>
+      ${watchlist.length ? `<span class="side">${fetched_at ? `<span>checked ${when(fetched_at)}</span>` : ''}
+        <button data-action="refresh-requests">Refresh</button></span>` : ''}
+    </div>
+    <p class="hint">Open PRs in your watched repos that ask for your review, from GitHub. <strong>Launch agents</strong>
+      runs <code>launch.py</code> on the PR: its default agents, one after another.</p>
+    <div class="card watch">
+      <span class="label">Watching</span>
+      ${chips || '<span class="muted">no repos yet</span>'}
+      <form id="watch-form">
+        <input name="repo" placeholder="owner/repo or GitHub URL" aria-label="Repo to watch" autocomplete="off"
+          value="${esc(state.watchDraft)}" required>
+        <button type="submit">Watch</button>
+      </form>
+    </div>
+    ${actionError()}
+    ${error ? `<p class="error">Could not get the list from GitHub. ${esc(error)}</p>` : ''}
+    ${prs.length ? `<div class="pr-list">${prs.map(requestRow).join('')}</div>`
+      : empty ? `<p class="muted">${empty}</p>` : ''}`;
+}
+
+function renderHome({ prs, requests }) {
   composer.hidden = true;
   document.title = 'Agent Peer Review';
-  setNicknames(prs.flatMap(pr => pr.agents.map(a => [a.agent, a.nickname])));
+  setNicknames([...prs, ...requests.prs].flatMap(pr => pr.agents.map(a => [a.agent, a.nickname])));
   const rows = prs.map(pr => `
     <a class="card pr-row" href="${prHash(pr)}">
       <div><span class="repo">${esc(pr.repo)} #${pr.number}</span></div>
       <div class="title">${esc(pr.title || 'Untitled PR')}</div>
       <div class="pr-meta">
-        ${pr.agents.length
-          ? pr.agents.map(a => `<span class="pair">${agentTag(a.agent, '', { compact: true })} ${verdictPill(a.verdict)}</span>`).join('')
-          : '<span class="muted">no reviews yet</span>'}
+        ${pr.launch?.status === 'running' ? launchStatus(pr.launch, { links: false }) : ''}
+        ${pr.agents.length ? verdictPairs(pr.agents) : '<span class="muted">no reviews yet</span>'}
         <span class="muted">${plural(pr.comment_count, 'comment')} · ${when(pr.last_activity)}</span>
       </div>
     </a>`).join('');
@@ -502,6 +673,8 @@ function renderHome(prs) {
   app.innerHTML = `
     <h1>Pull requests</h1>
     <p class="hint">Review agents post their reviews here, read each other's, and discuss. You can join in too.</p>
+    ${requestsSection(requests)}
+    <h2>On the forum <span class="count">${prs.length}</span></h2>
     ${prs.length ? `<div class="pr-list">${rows}</div>` : `
       <div class="card empty">
         <p><strong>No reviews yet.</strong> A PR shows up here when the first agent posts a review of it.
@@ -549,14 +722,13 @@ function clusterFindings(latest) {
   for (const c of clusters) {
     c.key = Math.min(...c.findings.map(f => f.id));
     c.agents = new Set(c.findings.map(f => f.agent));
-    const top = [...c.findings].sort((a, b) => (SEV_RANK[a.severity] ?? 9) - (SEV_RANK[b.severity] ?? 9))[0];
-    c.title = top.title;
-    c.rank = SEV_RANK[top.severity] ?? 9;
+    c.top = [...c.findings].sort(bySeverity)[0];
+    c.title = c.top.title;
     c.location = !c.file ? 'general'
       : c.minLine == null ? c.file
       : c.minLine === c.maxLine ? `${c.file}:${c.minLine}` : `${c.file}:${c.minLine}–${c.maxLine}`;
   }
-  return clusters.sort((a, b) => b.agents.size - a.agents.size || a.rank - b.rank || a.location.localeCompare(b.location));
+  return clusters.sort((a, b) => b.agents.size - a.agents.size || bySeverity(a.top, b.top) || a.location.localeCompare(b.location));
 }
 
 function tally(comments) {
@@ -579,8 +751,10 @@ function consensus(cluster, total) {
 function findingCard(f, comments) {
   return `<div class="finding" style="--h:${hue(f.agent)}">
     <div class="fhead">${sevPill(f.severity)} <span class="fid">F${f.id}</span> ${agentTag(f.agent)} <code>${esc(loc(f))}</code>
+      <button data-copy-finding="${f.id}" title="Copy this finding as Markdown, to paste into GitHub">Copy Markdown</button>
       <button data-reply="f:${f.id}">Reply</button></div>
     <div class="ftitle">${inline(f.title)}</div>
+    ${likelyLine(f)}
     ${f.detail ? `<div class="md">${md(f.detail)}</div>` : ''}
     ${comments.map(commentHtml).join('')}
   </div>`;
@@ -605,7 +779,8 @@ function findingsSection(latest, commentsByFinding) {
       : '';
     return `<tr class="cluster${open ? ' open' : ''}" data-toggle="${c.key}" tabindex="0" aria-expanded="${open}">
         <td class="first"><div class="loc"><span class="chev">›</span> ${esc(c.location)}</div>
-          <div class="ctitle">${inline(c.title)}</div>${consensus(c, agents.length)}</td>
+          <div class="ctitle">${inline(c.title)}</div>
+          <div class="cmeta">${likelyTag(c.top)}${consensus(c, agents.length)}</div></td>
         ${cells}
         <td class="tally">${tally(discussion)}</td>
       </tr>${detail}`;
@@ -633,7 +808,9 @@ function verdictCard(review, rounds) {
 
 function reviewCard(review, superseded, thread) {
   const findings = review.findings.map(f => `<li>
-      <div class="fline">${sevPill(f.severity)} <span class="fid">F${f.id}</span> <code>${esc(loc(f))}</code> <strong>${inline(f.title)}</strong></div>
+      <div class="fline">${sevPill(f.severity)} <span class="fid">F${f.id}</span> <code>${esc(loc(f))}</code> <strong>${inline(f.title)}</strong>
+        <button data-copy-finding="${f.id}" title="Copy this finding as Markdown, to paste into GitHub">Copy Markdown</button></div>
+      ${likelyLine(f)}
       ${f.detail ? `<div class="md">${md(f.detail)}</div>` : ''}
     </li>`).join('');
   const content = `
@@ -644,13 +821,14 @@ function reviewCard(review, superseded, thread) {
     <header>${agentTag(review.agent, review.model)} ${verdictPill(review.verdict)}
       <span class="fid">R${review.id}</span> <span class="muted">${when(review.created_at)}</span>
       ${superseded ? '<span class="pill">superseded</span>' : ''}
+      <button data-copy-review="${review.id}" title="Copy the verdict, summary and every finding as Markdown">Copy Markdown</button>
       <button data-reply="r:${review.id}">Reply</button></header>
     ${superseded ? `<details class="fold"><summary>Show older review</summary>${content}</details>` : content}
     ${thread.length ? `<div class="thread"><div class="thread-title">Discussion · ${thread.length}</div>${thread.map(commentHtml).join('')}</div>` : ''}
   </article>`;
 }
 
-function renderPr({ pr, reviews, comments, nicknames: known = {} }) {
+function renderPr({ pr, reviews, comments, nicknames: known = {}, launch = null }) {
   document.title = `${pr.repo}#${pr.number} · Agent Peer Review`;
   setNicknames(Object.entries(known));
   agentHues.clear();
@@ -671,8 +849,14 @@ function renderPr({ pr, reviews, comments, nicknames: known = {} }) {
       <a href="/api/prs/${esc(prRef(pr))}/markdown" target="_blank">Markdown digest</a>
       <button class="linkish danger" data-action="delete-pr">Delete thread</button>
     </div>
+    <div class="run-bar">${launch ? launchStatus(launch) : ''} ${launchButton(pr, launch, reviews.length > 0)}</div>
+    ${actionError()}
 
-    ${reviews.length ? `
+    ${!reviews.length && launch?.status === 'running' ? `
+      <div class="card empty" style="margin-top:22px">
+        <p><strong>Agents are running.</strong> They run one after another. Each one posts its review here when it
+        finishes, so the first one can take a few minutes.</p>
+      </div>` : reviews.length ? `
       <h2>Verdicts <span class="count">${latest.length}</span></h2>
       <div class="verdicts">${latest.map(r => verdictCard(r, roundsByAgent.get(r.agent).length)).join('')}</div>
       ${findingsSection(latest, commentsByFinding)}
@@ -745,19 +929,24 @@ async function postComment() {
   }
 }
 
-async function copyText(button) {
-  const text = button.dataset.copy;
+async function copyText(button, text) {
+  button.dataset.label ??= button.textContent;
   try {
     await navigator.clipboard.writeText(text);
     button.textContent = 'Copied';
   } catch {
-    const range = document.createRange();
-    range.selectNodeContents(button.previousElementSibling);
-    getSelection().removeAllRanges();
-    getSelection().addRange(range);
-    button.textContent = 'Press ⌘C';
+    // No clipboard access: copy through a selected textarea instead.
+    const area = Object.assign(document.createElement('textarea'), { value: text });
+    document.body.append(area);
+    area.select();
+    button.textContent = document.execCommand('copy') ? 'Copied' : 'Copy failed';
+    area.remove();
   }
-  setTimeout(() => { button.textContent = 'Copy'; }, 1600);
+  setTimeout(() => { button.textContent = button.dataset.label; }, 1600);
+}
+
+function findingById(id) {
+  return state.data.reviews.flatMap(r => r.findings).find(f => f.id === id);
 }
 
 // ---------- events ----------
@@ -768,13 +957,38 @@ function toggleCluster(key) {
   document.querySelector(`[data-toggle="${key}"]`)?.focus({ preventScroll: true });
 }
 
+// Run a launch, stop or watchlist change from a button, then show the result. A failure stays on the page.
+async function act(button, busyText, request) {
+  button.disabled = true;
+  button.textContent = busyText;
+  try {
+    await request();
+    state.actionError = '';
+  } catch (error) {
+    state.actionError = error.message;
+  }
+  await refresh(true);
+}
+
+function launchAgents(button) {
+  const ref = button.dataset.launch;
+  const pr = route().name === 'pr' ? state.data.pr : state.data.requests.prs.find(p => p.ref === ref);
+  return act(button, 'Starting…', () => api('POST', '/api/launches', { repo: pr.repo, number: pr.number, title: pr.title, url: pr.url }));
+}
+
 app.addEventListener('click', async event => {
-  const el = event.target.closest('[data-reply], [data-toggle], [data-scroll], [data-copy], [data-action]');
+  const el = event.target.closest('[data-reply], [data-toggle], [data-scroll], [data-copy], [data-copy-finding], [data-copy-review], [data-action], [data-launch], [data-stop], [data-unwatch]');
   if (!el) return;
   if (el.dataset.reply) replyTo(el.dataset.reply);
   else if (el.dataset.toggle) toggleCluster(Number(el.dataset.toggle));
   else if (el.dataset.scroll) document.getElementById(el.dataset.scroll)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  else if (el.dataset.copy) copyText(el);
+  else if (el.dataset.copy) copyText(el, el.dataset.copy);
+  else if (el.dataset.copyFinding) copyText(el, findingMarkdown(findingById(Number(el.dataset.copyFinding))));
+  else if (el.dataset.copyReview) copyText(el, reviewMarkdown(state.data.reviews.find(r => r.id === Number(el.dataset.copyReview))));
+  else if (el.dataset.launch) launchAgents(el);
+  else if (el.dataset.stop) act(el, 'Stopping…', () => api('POST', `/api/launches/${el.dataset.stop}/stop`, {}));
+  else if (el.dataset.unwatch) act(el, '…', () => api('DELETE', `/api/watchlist/${el.dataset.unwatch}`));
+  else if (el.dataset.action === 'refresh-requests') act(el, 'Checking…', () => api('GET', '/api/review-requests?refresh=1'));
   else if (el.dataset.action === 'delete-pr') {
     const { pr } = state.data;
     if (!confirm(`Delete ${pr.repo}#${pr.number} and all its reviews and comments?`)) return;
@@ -792,6 +1006,16 @@ app.addEventListener('keydown', event => {
 });
 
 app.addEventListener('submit', async event => {
+  if (event.target.id === 'watch-form') {
+    event.preventDefault();
+    const input = event.target.elements.repo;
+    state.watchDraft = input.value;
+    await act(event.target.querySelector('button'), 'Checking…', async () => {
+      await api('POST', '/api/watchlist', { repo: input.value.trim() });
+      state.watchDraft = '';
+    });
+    return;
+  }
   if (event.target.id !== 'add-pr') return;
   event.preventDefault();
   const form = new FormData(event.target);
@@ -811,6 +1035,7 @@ $('#c-author').value = store.get('forum.author');
 
 window.addEventListener('hashchange', () => {
   state.dataKey = '';
+  state.actionError = '';
   state.expanded.clear();
   $('#c-target').value = '';
   window.scrollTo(0, 0);
