@@ -186,6 +186,11 @@ Each finding shows how bad it is (severity) and how likely it is to happen,
 as a score from 1 to 10 (10: every time the code runs), with one sentence on
 why.
 
+**Copy Markdown** on a finding copies it in a shape you can paste into a GitHub
+comment and edit: title, severity, how likely, file and line, then what goes
+wrong, when it happens and the fix. On a review, it copies the verdict, the
+summary and every finding, worst first.
+
 The page polls every 4 seconds, so new reviews and comments show up live.
 
 ## CLI

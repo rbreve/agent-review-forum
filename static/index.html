@@ -178,6 +178,7 @@ tr.detail td { background: var(--panel-2); padding: 2px 14px 14px; }
 .fhead { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; font-size: 13px; }
 .fhead code { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .fhead button { margin-left: auto; }
+.fhead button + button { margin-left: 0; }
 .ftitle { font-weight: 600; margin: 6px 0 4px; }
 .cmeta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 2px; }
 
@@ -185,12 +186,14 @@ tr.detail td { background: var(--panel-2); padding: 2px 14px 14px; }
 .review { padding: 16px 18px; margin-bottom: 12px; scroll-margin-top: 70px; }
 .review > header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
 .review > header button { margin-left: auto; }
+.review > header button + button { margin-left: 0; }
 .review.superseded { opacity: .72; }
 .review .summary { margin: 12px 0 0; padding: 10px 12px; background: var(--panel-2); border-radius: 8px; font-size: 14px; }
 .review .body { margin-top: 12px; }
 .flist { list-style: none; padding: 0; margin: 14px 0 0; display: grid; gap: 8px; }
 .flist li { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; }
 .flist .fline { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: baseline; }
+.flist .fline button { margin-left: auto; }
 .flist code { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .flist .md { margin-top: 4px; font-size: 13.5px; color: var(--muted); }
 details.fold > summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-top: 12px; }
@@ -351,6 +354,7 @@ const verdictPill = v => `<span class="pill v-${esc(v)}">${esc(VERDICT_LABEL[v] 
 const sevPill = s => `<span class="pill s-${esc(s)}">${esc(s)}</span>`;
 const stancePill = s => s ? `<span class="pill st-${esc(s)}">${esc(s)}</span>` : '';
 const loc = f => !f.file ? 'general' : f.line != null ? `${f.file}:${f.line}` : f.file;
+const cap = text => text.charAt(0).toUpperCase() + text.slice(1);
 // How likely a finding is to happen, as a score from 1 to 10. Older findings have none.
 const likelyScore = f => Number.isInteger(f.likelihood) ? `<strong class="lk-${f.likelihood >= 9 ? 'certain'
   : f.likelihood >= 6 ? 'likely' : f.likelihood >= 3 ? 'possible' : 'unlikely'}">${f.likelihood}/10</strong>` : '';
@@ -365,6 +369,30 @@ function likelyLine(f) {
 // Worst first: by severity, then the most likely.
 const bySeverity = (a, b) => (SEV_RANK[a.severity] ?? 9) - (SEV_RANK[b.severity] ?? 9)
   || (b.likelihood ?? 0) - (a.likelihood ?? 0);
+
+// ---------- Markdown to paste into GitHub ----------
+
+// One finding as a GitHub comment: what, how bad, how likely, where, then the agent's detail.
+// heading replaces the bold title, e.g. "### 2." inside a whole review.
+function findingMarkdown(f, heading = '') {
+  const odds = f.likelihood || f.likelihood_reason
+    ? ` · **How likely:** ${[f.likelihood && `${f.likelihood}/10.`, f.likelihood_reason].filter(Boolean).join(' ')}` : '';
+  return [
+    heading ? `${heading} ${f.title}` : `**${f.title}**`,
+    `**Severity:** ${cap(f.severity)}${odds}`,
+    f.file ? `**Where:** \`${loc(f)}\`` : '',
+    f.detail,
+  ].filter(Boolean).join('\n\n');
+}
+
+// A whole review: the verdict and summary, then every finding, worst first. The long body stays on the forum.
+function reviewMarkdown(review) {
+  const findings = [...review.findings].sort(bySeverity);
+  return [
+    `**${VERDICT_LABEL[review.verdict] || review.verdict}.** ${review.summary || ''}`.trim(),
+    ...findings.map((f, i) => findingMarkdown(f, `### ${i + 1}.`)),
+  ].join('\n\n');
+}
 
 function latestReviews(reviews) {
   const latest = new Map();
@@ -723,6 +751,7 @@ function consensus(cluster, total) {
 function findingCard(f, comments) {
   return `<div class="finding" style="--h:${hue(f.agent)}">
     <div class="fhead">${sevPill(f.severity)} <span class="fid">F${f.id}</span> ${agentTag(f.agent)} <code>${esc(loc(f))}</code>
+      <button data-copy-finding="${f.id}" title="Copy this finding as Markdown, to paste into GitHub">Copy Markdown</button>
       <button data-reply="f:${f.id}">Reply</button></div>
     <div class="ftitle">${inline(f.title)}</div>
     ${likelyLine(f)}
@@ -779,7 +808,8 @@ function verdictCard(review, rounds) {
 
 function reviewCard(review, superseded, thread) {
   const findings = review.findings.map(f => `<li>
-      <div class="fline">${sevPill(f.severity)} <span class="fid">F${f.id}</span> <code>${esc(loc(f))}</code> <strong>${inline(f.title)}</strong></div>
+      <div class="fline">${sevPill(f.severity)} <span class="fid">F${f.id}</span> <code>${esc(loc(f))}</code> <strong>${inline(f.title)}</strong>
+        <button data-copy-finding="${f.id}" title="Copy this finding as Markdown, to paste into GitHub">Copy Markdown</button></div>
       ${likelyLine(f)}
       ${f.detail ? `<div class="md">${md(f.detail)}</div>` : ''}
     </li>`).join('');
@@ -791,6 +821,7 @@ function reviewCard(review, superseded, thread) {
     <header>${agentTag(review.agent, review.model)} ${verdictPill(review.verdict)}
       <span class="fid">R${review.id}</span> <span class="muted">${when(review.created_at)}</span>
       ${superseded ? '<span class="pill">superseded</span>' : ''}
+      <button data-copy-review="${review.id}" title="Copy the verdict, summary and every finding as Markdown">Copy Markdown</button>
       <button data-reply="r:${review.id}">Reply</button></header>
     ${superseded ? `<details class="fold"><summary>Show older review</summary>${content}</details>` : content}
     ${thread.length ? `<div class="thread"><div class="thread-title">Discussion · ${thread.length}</div>${thread.map(commentHtml).join('')}</div>` : ''}
@@ -898,19 +929,24 @@ async function postComment() {
   }
 }
 
-async function copyText(button) {
-  const text = button.dataset.copy;
+async function copyText(button, text) {
+  button.dataset.label ??= button.textContent;
   try {
     await navigator.clipboard.writeText(text);
     button.textContent = 'Copied';
   } catch {
-    const range = document.createRange();
-    range.selectNodeContents(button.previousElementSibling);
-    getSelection().removeAllRanges();
-    getSelection().addRange(range);
-    button.textContent = 'Press ⌘C';
+    // No clipboard access: copy through a selected textarea instead.
+    const area = Object.assign(document.createElement('textarea'), { value: text });
+    document.body.append(area);
+    area.select();
+    button.textContent = document.execCommand('copy') ? 'Copied' : 'Copy failed';
+    area.remove();
   }
-  setTimeout(() => { button.textContent = 'Copy'; }, 1600);
+  setTimeout(() => { button.textContent = button.dataset.label; }, 1600);
+}
+
+function findingById(id) {
+  return state.data.reviews.flatMap(r => r.findings).find(f => f.id === id);
 }
 
 // ---------- events ----------
@@ -941,12 +977,14 @@ function launchAgents(button) {
 }
 
 app.addEventListener('click', async event => {
-  const el = event.target.closest('[data-reply], [data-toggle], [data-scroll], [data-copy], [data-action], [data-launch], [data-stop], [data-unwatch]');
+  const el = event.target.closest('[data-reply], [data-toggle], [data-scroll], [data-copy], [data-copy-finding], [data-copy-review], [data-action], [data-launch], [data-stop], [data-unwatch]');
   if (!el) return;
   if (el.dataset.reply) replyTo(el.dataset.reply);
   else if (el.dataset.toggle) toggleCluster(Number(el.dataset.toggle));
   else if (el.dataset.scroll) document.getElementById(el.dataset.scroll)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  else if (el.dataset.copy) copyText(el);
+  else if (el.dataset.copy) copyText(el, el.dataset.copy);
+  else if (el.dataset.copyFinding) copyText(el, findingMarkdown(findingById(Number(el.dataset.copyFinding))));
+  else if (el.dataset.copyReview) copyText(el, reviewMarkdown(state.data.reviews.find(r => r.id === Number(el.dataset.copyReview))));
   else if (el.dataset.launch) launchAgents(el);
   else if (el.dataset.stop) act(el, 'Stopping…', () => api('POST', `/api/launches/${el.dataset.stop}/stop`, {}));
   else if (el.dataset.unwatch) act(el, '…', () => api('DELETE', `/api/watchlist/${el.dataset.unwatch}`));
