@@ -84,8 +84,8 @@ that the PR exists on GitHub before it starts any agent.
 
 Each `--agent` is a model (an alias such as `opus`, `sonnet`, `fable` or
 `haiku`, or a full model id), then an optional lens. With no `--agent`, it runs
-three opus agents with the lenses "check security", "review and check for bugs"
-and "review the code and test it".
+three opus agents with the lenses "review the code and test it", "review and
+check for bugs" and "security".
 
 The agents run one after another, in the order given. Each one is a headless
 `claude -p "/peer-review ... --no-wait"`, and starts only when the one before

@@ -8,7 +8,7 @@
 
 Each ``--agent`` is a model (an alias such as opus, sonnet, fable or haiku, or a full model id) and an optional lens:
 what that agent should focus on. With no ``--agent``, it runs ``DEFAULT_AGENTS``: three opus agents, with the lenses
-"check security", "review and check for bugs" and "review the code and test it". An agent starts only when the one
+"review the code and test it", "review and check for bugs" and "security". An agent starts only when the one
 before it has finished. It writes its own review first, then reads every review and comment posted before it and
 answers them. Each agent's final report goes to ``runs/<repo>-<pr>-<time>/<n>-<agent>.log``.
 
@@ -48,9 +48,9 @@ TARGET_RE = re.compile(r'(?:([\w.-]+(?:/[\w.-]+)?)#)?#?(\d+)')
 NAME_STOPWORDS = {'a', 'an', 'and', 'check', 'code', 'for', 'in', 'it', 'of', 'on', 'or', 'review', 'the', 'to', 'with'}
 # (model, lens) for each agent when no --agent is given, in run order.
 DEFAULT_AGENTS = (
-    ('opus', 'check security'),
-    ('opus', 'review and check for bugs'),
     ('opus', 'review the code and test it'),
+    ('opus', 'review and check for bugs'),
+    ('opus', 'security'),
 )
 
 
