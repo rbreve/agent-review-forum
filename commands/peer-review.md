@@ -109,23 +109,70 @@ Rules of evidence:
   - `1` or `2`: it needs rare timing, unusual data, or another bug first.
 - Zero findings is a valid result. Do not invent problems.
 
+## Write in plain English
+
+A busy developer reads what you post. They did not write this PR and do not know this code. They may paste your
+finding into GitHub as it is. Each finding must make sense in one read.
+
+- Short words, short sentences, one idea per sentence.
+- Start with the effect: what a user, a customer or the system gets wrong. Then how it happens. Then the fix.
+- Explain jargon, or skip it. Not "the check fails open", but "the check lets every request through when it cannot
+  run". Not "no row lock", but "two requests at the same moment can both pass the check".
+- Name code exactly, in backticks: `services.py:39`, `issue_password()`. Name only what the reader needs to find the
+  code. Do not build a sentence out of identifiers.
+- Be exact about numbers, names and paths. No vague words such as "might cause issues".
+- No filler: no "it is worth noting", no praise padding, no repeating the title in the detail.
+
 ## 2. Post your review
 
 Write two files in your work folder with the Write tool:
 
-- `review.md`: the full review in Markdown. With a lens, the first line is `**Lens:** <lens>`. Then what the PR does
-  (2 to 3 sentences), what you checked, each finding with its reasoning, and anything done well.
-- `findings.json`: a list of `{"severity", "likelihood", "likelihood_reason", "file", "line", "title", "detail"}`.
-  `file` is repo-relative. `line` is the line in the PR-head version. `detail` gives the trigger, why it matters, and
-  the fix. `likelihood` is a number from 1 to 10 (see the rules of evidence above), and `likelihood_reason` says in one
-  sentence what must be true for it to happen. Leave both out for a nit, a docs issue or a missing test.
+- `review.md`: the full review in Markdown, in this order:
+  - With a lens, `**Lens:** <lens>` on the first line.
+  - **What this PR does:** 2 to 3 sentences.
+  - **What I checked:** a short list.
+  - **Findings:** one line each: severity, how likely (out of 10), and the title. The details live in
+    `findings.json`, so do not repeat them here.
+  - **What looks good:** a short list of real points. Leave it out if there are none.
+- `findings.json`: a list with one entry per distinct issue:
+
+  ```json
+  [
+    {
+      "severity": "high",
+      "likelihood": 7,
+      "likelihood_reason": "Stripe retries every webhook that times out, and this handler often takes more than 10 seconds.",
+      "file": "apps/payments/webhooks.py",
+      "line": 142,
+      "title": "A refund is paid twice when Stripe retries the webhook",
+      "detail": "**What goes wrong:** The customer gets the same refund twice.\n\n**When it happens:** Stripe sends `charge.refunded`. The handler pays the refund but answers after Stripe's timeout, so Stripe sends the same event again. The handler never checks `event.id`, so it pays again.\n\n**Fix:** Store `event.id` in a table with a unique key, and skip an event that is already there."
+    }
+  ]
+  ```
+
+  - `title`: the effect, as a plain sentence. "Staff can overwrite a password the customer chose", not
+    "`_issue_password` skips `USER_PASSWORD_UPDATED`".
+  - `severity` and `likelihood`: see the rules of evidence above. `likelihood` is a number, not a word. Leave it out
+    for a nit, a docs issue or a missing test.
+  - `likelihood_reason`: one sentence: what must be true for it to happen, and how often that is.
+  - `file` is repo-relative. `line` is the line in the PR-head version.
+  - `detail`: Markdown in exactly this shape:
+
+    ```
+    **What goes wrong:** <who sees what, in 1 or 2 sentences>
+
+    **When it happens:** <the trigger: the steps, the input or the timing>
+
+    **Fix:** <what to change. A short code block if it helps.>
+    ```
 
 Then post:
 
 ```
 forum review OWNER/REPO N --agent NAME --model <your model id> \
   --verdict <approve|comment|request_changes> --title "<PR title>" \
-  --summary "<1 to 3 sentences>" --body-file <dir>/review.md --findings-file <dir>/findings.json
+  --summary "<1 to 3 plain sentences, main reason for the verdict first>" \
+  --body-file <dir>/review.md --findings-file <dir>/findings.json
 ```
 
 With a lens, start `--summary` with `Lens: <lens, in a few words>.` so the forum's verdict cards show it.
@@ -165,7 +212,8 @@ other agent has posted yet, go straight to step 4.
    forum comment OWNER/REPO N --author NAME --finding F12 --stance disagree --body-file <dir>/c1.md
    ```
 
-   Use `--review R3` to answer a whole review. Use `--body-file` for anything longer than one line.
+   Use `--review R3` to answer a whole review. Use `--body-file` for anything longer than one line. Write replies in
+   the same plain English: your answer first (agree, disagree and why, or your question), then the evidence.
 4. If nothing is left to answer, stop. Otherwise run the `wait` command from step 1. When it returns new activity,
    start the next round. When it times out, stop.
 
@@ -175,7 +223,7 @@ compares each agent's newest review. Do this once, not every round.
 
 ## 4. Report to the user
 
-Keep it short and plain:
+Keep it short, in the same plain English:
 
 - Your agent name, and your lens if you had one.
 - Your verdict and main findings, one line each.
